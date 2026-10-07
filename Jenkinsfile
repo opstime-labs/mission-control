@@ -27,13 +27,10 @@ pipeline {
         stage('.NET Deterministic Restore, Build & Test') {
             steps {
                 script {
-                    // Extract the real host path of the workspace from Jenkins volume inspection
                     def hostWorkspace = sh(
                         script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
                         returnStdout: true
                     ).trim() + "/workspace/${JOB_NAME}"
-
-                    echo "Resolved Host Physical Path: ${hostWorkspace}"
 
                     sh """
                         docker run --rm \
@@ -51,9 +48,6 @@ pipeline {
                           bash -c '
                             set -euo pipefail
 
-                            echo "--> Verifying mounted files in container:"
-                            ls -la /workspace/MissionControl.sln
-
                             echo "--> [CGP Audit] Restoring locked dependencies from local Nexus feed..."
                             dotnet restore MissionControl.sln \
                               --locked-mode \
@@ -68,6 +62,7 @@ pipeline {
                               /p:Deterministic=true
 
                             echo "--> [Telemetry] Executing test suite with TRX logger for V&V evidence..."
+                            mkdir -p /workspace/TestResults
                             dotnet test tests/MissionControl.Tests/MissionControl.Tests.csproj \
                               -c Release \
                               --no-build \
@@ -77,38 +72,27 @@ pipeline {
                     """
                 }
             }
-            post {
-                always {
-                    junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
-                }
-            }
         }
 
         stage('Multi-Stage Container Packaging') {
             steps {
-                script {
-                    def hostWorkspace = sh(
-                        script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
-                        returnStdout: true
-                    ).trim() + "/workspace/${JOB_NAME}"
-
-                    sh """
-                        echo "--> Building hardened target container via Multi-Stage Dockerfile..."
-                        docker build \
-                          --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
-                          --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
-                          -t ${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT} \
-                          -t ${IMAGE_NAME}:latest \
-                          "${hostWorkspace}"
-                    """
-                }
+                sh """
+                    echo "--> Streaming workspace context directly to Docker daemon..."
+                    tar --exclude='.git' --exclude='TestResults' -cf - . | docker build \
+                      --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                      --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
+                      -t ${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT} \
+                      -t ${IMAGE_NAME}:latest \
+                      -
+                """
             }
         }
     }
 
     post {
         always {
-            cleanWs deleteDirs: true, notFailBuild: true
+            // Clean workspace cleanly without deferred locks
+            cleanWs notFailBuild: true
         }
         success {
             echo "SUCCESS: Baseline verified and containerized: ${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
