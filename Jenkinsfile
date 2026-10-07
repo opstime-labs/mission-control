@@ -24,20 +24,17 @@ pipeline {
             }
         }
 
-        stage('.NET Deterministic Restore, Build & Test') {
+       stage('.NET Deterministic Restore, Build & Test') {
             steps {
                 sh """
-                    # 1. Ephemeral non-root container directories inside mounted workspace
-                    mkdir -p ${WORKSPACE}/.dotnet_cache ${WORKSPACE}/.nuget_packages ${WORKSPACE}/TestResults
-
-                    # 2. Ephemeral .NET SDK container mapped to host UID/GID
+                    # Run compilation inside an ephemeral SDK container using /tmp for cache
                     docker run --rm \
-                      -u \$(id -u):\$(id -g) \
                       -v ${WORKSPACE}:/src \
                       -w /src \
-                      -e HOME=/src/.dotnet_cache \
-                      -e DOTNET_CLI_HOME=/src/.dotnet_cache \
-                      -e NUGET_PACKAGES=/src/.nuget_packages \
+                      --tmpfs /tmp:rw,exec,nosuid,size=1024m \
+                      -e HOME=/tmp \
+                      -e DOTNET_CLI_HOME=/tmp/.dotnet \
+                      -e NUGET_PACKAGES=/tmp/.nuget/packages \
                       -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
                       -e DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
                       -e DOTNET_NOLOGO=true \
@@ -70,7 +67,6 @@ pipeline {
             }
             post {
                 always {
-                    // Collect TRX evidence into Jenkins for audit records
                     junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
                 }
             }
