@@ -278,6 +278,13 @@
           "System.Text.Encodings.Web": "10.0.0"
         }
       }
+    },
+    "net8.0/linux-x64": {
+      "System.Text.Encodings.Web": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "257hh1ep1Gqm1Lm0ulxf7vVBVMJuGN6EL4xSWjpi46DffXzm1058IiWsfSC06zSm7SniN+Tb5160UnXsSa8rRg=="
+      }
     }
   }
 }
