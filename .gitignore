@@ -18,3 +18,5 @@ TestResults/
 ## OS-specific clutter
 .DS_Store
 Thumbs.db
+.dotnet_cache/
+.nuget_packages/
