@@ -21,57 +21,61 @@ pipeline {
                 echo "Commit SHA:   ${GIT_COMMIT_SHORT}"
                 echo "Agent Node:   ${NODE_NAME} | Workspace: ${WORKSPACE}"
                 echo "=========================================================="
-                // Audit the exact files checked out into Jenkins workspace
-                sh 'ls -la'
             }
         }
 
         stage('.NET Deterministic Restore, Build & Test') {
             steps {
-                sh """
-                    # Verify sln exists before running Docker
-                    if [ ! -f "MissionControl.sln" ]; then
-                        echo "FATAL: MissionControl.sln missing from workspace root!"
-                        ls -la
-                        exit 1
-                    fi
+                script {
+                    // Extract the real host path of the workspace from Jenkins volume inspection
+                    def hostWorkspace = sh(
+                        script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
+                        returnStdout: true
+                    ).trim() + "/workspace/${JOB_NAME}"
 
-                    docker run --rm \
-                      -v ${WORKSPACE}:/workspace \
-                      -w /workspace \
-                      --tmpfs /tmp:rw,exec,nosuid,size=1024m \
-                      -e HOME=/tmp \
-                      -e DOTNET_CLI_HOME=/tmp/.dotnet \
-                      -e NUGET_PACKAGES=/tmp/.nuget/packages \
-                      -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-                      -e DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
-                      -e DOTNET_NOLOGO=true \
-                      -e ContinuousIntegrationBuild=true \
-                      ${DOTNET_IMAGE} \
-                      bash -c '
-                        set -euo pipefail
+                    echo "Resolved Host Physical Path: ${hostWorkspace}"
 
-                        echo "--> [CGP Audit] Restoring locked dependencies from local Nexus feed..."
-                        dotnet restore MissionControl.sln \
-                          --locked-mode \
-                          --configfile nuget.config
+                    sh """
+                        docker run --rm \
+                          -v "${hostWorkspace}:/workspace" \
+                          -w /workspace \
+                          --tmpfs /tmp:rw,exec,nosuid,size=1024m \
+                          -e HOME=/tmp \
+                          -e DOTNET_CLI_HOME=/tmp/.dotnet \
+                          -e NUGET_PACKAGES=/tmp/.nuget/packages \
+                          -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+                          -e DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+                          -e DOTNET_NOLOGO=true \
+                          -e ContinuousIntegrationBuild=true \
+                          ${DOTNET_IMAGE} \
+                          bash -c '
+                            set -euo pipefail
 
-                        echo "--> [V&V Gate] Enforcing zero compiler warnings and deterministic flags..."
-                        dotnet build MissionControl.sln \
-                          -c Release \
-                          --no-restore \
-                          /p:TreatWarningsAsErrors=true \
-                          /p:ContinuousIntegrationBuild=true \
-                          /p:Deterministic=true
+                            echo "--> Verifying mounted files in container:"
+                            ls -la /workspace/MissionControl.sln
 
-                        echo "--> [Telemetry] Executing test suite with TRX logger for V&V evidence..."
-                        dotnet test tests/MissionControl.Tests/MissionControl.Tests.csproj \
-                          -c Release \
-                          --no-build \
-                          --logger "trx;LogFileName=test_results.trx" \
-                          --results-directory /workspace/TestResults
-                      '
-                """
+                            echo "--> [CGP Audit] Restoring locked dependencies from local Nexus feed..."
+                            dotnet restore MissionControl.sln \
+                              --locked-mode \
+                              --configfile nuget.config
+
+                            echo "--> [V&V Gate] Enforcing zero compiler warnings and deterministic flags..."
+                            dotnet build MissionControl.sln \
+                              -c Release \
+                              --no-restore \
+                              /p:TreatWarningsAsErrors=true \
+                              /p:ContinuousIntegrationBuild=true \
+                              /p:Deterministic=true
+
+                            echo "--> [Telemetry] Executing test suite with TRX logger for V&V evidence..."
+                            dotnet test tests/MissionControl.Tests/MissionControl.Tests.csproj \
+                              -c Release \
+                              --no-build \
+                              --logger "trx;LogFileName=test_results.trx" \
+                              --results-directory /workspace/TestResults
+                          '
+                    """
+                }
             }
             post {
                 always {
@@ -82,14 +86,22 @@ pipeline {
 
         stage('Multi-Stage Container Packaging') {
             steps {
-                sh """
-                    echo "--> Building hardened target container via Multi-Stage Dockerfile..."
-                    docker build \
-                      --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
-                      --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
-                      -t ${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT} \
-                      -t ${IMAGE_NAME}:latest .
-                """
+                script {
+                    def hostWorkspace = sh(
+                        script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
+                        returnStdout: true
+                    ).trim() + "/workspace/${JOB_NAME}"
+
+                    sh """
+                        echo "--> Building hardened target container via Multi-Stage Dockerfile..."
+                        docker build \
+                          --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                          --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
+                          -t ${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT} \
+                          -t ${IMAGE_NAME}:latest \
+                          "${hostWorkspace}"
+                    """
+                }
             }
         }
     }
