@@ -7,7 +7,7 @@ pipeline {
         DOTNET_NOLOGO                     = 'true'
         ContinuousIntegrationBuild        = 'true'
         DOTNET_IMAGE                      = 'mcr.microsoft.com/dotnet/sdk:8.0-jammy'
-        REGISTRY_HOST                     = 'nexus.homelab.local:8082' // Sonatype Nexus Docker repo
+        REGISTRY_HOST                     = 'nexus.homelab.local:8082'
         IMAGE_NAME                        = 'mission-control/sensor-gateway'
         GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
     }
@@ -21,16 +21,24 @@ pipeline {
                 echo "Commit SHA:   ${GIT_COMMIT_SHORT}"
                 echo "Agent Node:   ${NODE_NAME} | Workspace: ${WORKSPACE}"
                 echo "=========================================================="
+                // Audit the exact files checked out into Jenkins workspace
+                sh 'ls -la'
             }
         }
 
-       stage('.NET Deterministic Restore, Build & Test') {
+        stage('.NET Deterministic Restore, Build & Test') {
             steps {
                 sh """
-                    # Run compilation inside an ephemeral SDK container using /tmp for cache
+                    # Verify sln exists before running Docker
+                    if [ ! -f "MissionControl.sln" ]; then
+                        echo "FATAL: MissionControl.sln missing from workspace root!"
+                        ls -la
+                        exit 1
+                    fi
+
                     docker run --rm \
-                      -v ${WORKSPACE}:/src \
-                      -w /src \
+                      -v ${WORKSPACE}:/workspace \
+                      -w /workspace \
                       --tmpfs /tmp:rw,exec,nosuid,size=1024m \
                       -e HOME=/tmp \
                       -e DOTNET_CLI_HOME=/tmp/.dotnet \
@@ -61,7 +69,7 @@ pipeline {
                           -c Release \
                           --no-build \
                           --logger "trx;LogFileName=test_results.trx" \
-                          --results-directory /src/TestResults
+                          --results-directory /workspace/TestResults
                       '
                 """
             }
@@ -88,7 +96,6 @@ pipeline {
 
     post {
         always {
-            sh "rm -rf ${WORKSPACE}/.dotnet_cache ${WORKSPACE}/.nuget_packages"
             cleanWs deleteDirs: true, notFailBuild: true
         }
         success {
