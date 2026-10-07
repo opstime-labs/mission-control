@@ -1,0 +1,20 @@
+## .NET build artifacts
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Test and coverage results
+TestResults/
+*.trx
+*.coverage
+
+## Dotnet local tools & cache
+.dotnet/
+*.lock.json.bak
+
+## OS-specific clutter
+.DS_Store
+Thumbs.db

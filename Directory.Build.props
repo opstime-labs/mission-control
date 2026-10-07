@@ -1,0 +1,23 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Defence Strictness: Zero Warning Tolerance -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Suppress HTTP package source warning for internal homelab Nexus feed -->
+    <NoWarn>$(NoWarn);NU1803</NoWarn>
+
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- Controlled Baseline: Strip local host paths for bit-for-bit determinism -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- Maintain lock files automatically -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+</Project>
