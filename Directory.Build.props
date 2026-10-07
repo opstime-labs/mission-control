@@ -16,8 +16,13 @@
     <!-- Controlled Baseline: Strip local host paths for bit-for-bit determinism -->
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
-
-    <!-- Maintain lock files automatically -->
+    
+    <!-- NuGet Lockfile Configuration -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
+
+    <!-- Support both AnyCPU portable dev and linux-x64 container runtime -->
+    <RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>
+
   </PropertyGroup>
 </Project>
