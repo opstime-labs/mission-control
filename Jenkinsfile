@@ -48,14 +48,16 @@ pipeline {
                           bash -c '
                             set -euo pipefail
 
-                            echo "--> [CGP Audit] Restoring locked dependencies from local Nexus feed..."
+                            echo "--> [CGP Audit] Restoring locked dependencies for linux-x64..."
                             dotnet restore MissionControl.sln \
+                              -r linux-x64 \
                               --locked-mode \
                               --configfile nuget.config
 
                             echo "--> [V&V Gate] Enforcing zero compiler warnings and deterministic flags..."
                             dotnet build MissionControl.sln \
                               -c Release \
+                              -r linux-x64 \
                               --no-restore \
                               /p:TreatWarningsAsErrors=true \
                               /p:ContinuousIntegrationBuild=true \
@@ -73,6 +75,8 @@ pipeline {
                 }
             }
         }
+
+
 
         stage('Multi-Stage Container Packaging') {
             steps {
