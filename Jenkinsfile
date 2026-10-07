@@ -77,8 +77,16 @@ pipeline {
         stage('Multi-Stage Container Packaging') {
             steps {
                 sh """
-                    echo "--> Streaming workspace context directly to Docker daemon..."
-                    tar --exclude='.git' --exclude='TestResults' -cf - . | docker build \
+                    echo "--> Sanitizing build context and streaming to Docker daemon..."
+                    tar --exclude='.git' \
+                        --exclude='TestResults' \
+                        --exclude='bin' \
+                        --exclude='obj' \
+                        --exclude='*/bin' \
+                        --exclude='*/obj' \
+                        --exclude='*/*/bin' \
+                        --exclude='*/*/obj' \
+                        -cf - . | docker build \
                       --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
                       --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
                       -t ${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT} \
