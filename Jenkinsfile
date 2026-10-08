@@ -1,5 +1,10 @@
 pipeline {
     agent any
+    
+    // Poll GitHub every 5 minutes for new commits
+    triggers {
+        pollSCM('H/5 * * * *')
+    }
 
     environment {
         DOTNET_CLI_TELEMETRY_OPTOUT       = '1'
