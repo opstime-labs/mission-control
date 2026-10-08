@@ -4,7 +4,7 @@ pipeline {
     triggers {
         // Instant trigger on GitHub Webhook push
         githubPush() // GitHub Webhook
-        pollSCM('H/5 * * * *') // Poll GitHub every 5 minutes for new commits
+        pollSCM('H/3* * * *') // Poll GitHub every 3 minutes for new commits
     }
 
     environment {
