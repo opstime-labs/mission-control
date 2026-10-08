@@ -126,6 +126,83 @@ pipeline {
         }
     }
 
+    stage('Publish Raw Artifacts to Nexus') {
+            steps {
+                script {
+                    def hostWorkspace = sh(
+                        script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
+                        returnStdout: true
+                    ).trim() + "/workspace/${JOB_NAME}"
+
+                    // 1. Generate clean framework-dependent release binaries inside the SDK container
+                    sh """
+                        docker run --rm \
+                          -v "${hostWorkspace}:/workspace" \
+                          -w /workspace \
+                          --tmpfs /tmp:rw,exec,nosuid,size=1024m \
+                          -e HOME=/tmp \
+                          -e DOTNET_CLI_HOME=/tmp/.dotnet \
+                          -e NUGET_PACKAGES=/tmp/.nuget/packages \
+                          -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+                          -e DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+                          -e DOTNET_NOLOGO=true \
+                          -e ContinuousIntegrationBuild=true \
+                          ${DOTNET_IMAGE} \
+                          bash -c '
+                            set -euo pipefail
+                            echo "--> [V&V Package] Generating framework-dependent binary release layout..."
+                            rm -rf /workspace/publish_raw
+                            dotnet publish src/MissionControl.Api/MissionControl.Api.csproj \
+                              -c Release \
+                              --no-restore \
+                              -o /workspace/publish_raw \
+                              /p:ContinuousIntegrationBuild=true \
+                              /p:UseAppHost=false
+                          '
+                    """
+
+                    // 2. Archive, hash, and upload to the exact Nexus raw-hosted endpoint
+                    withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh """
+                            set -euo pipefail
+
+                            RELEASE_DIR="release_dist"
+                            mkdir -p "\${RELEASE_DIR}"
+
+                            ARTIFACT_NAME="mission-control-api-\${BUILD_NUMBER}-\${GIT_COMMIT_SHORT}.tar.gz"
+                            CHECKSUM_NAME="\${ARTIFACT_NAME}.sha256"
+
+                            echo "--> Compressing binary release package..."
+                            tar -czf "\${RELEASE_DIR}/\${ARTIFACT_NAME}" -C /var/jenkins_home/workspace/${JOB_NAME}/publish_raw .
+
+                            echo "--> Computing cryptographic SHA-256 baseline manifest..."
+                            cd "\${RELEASE_DIR}"
+                            sha256sum "\${ARTIFACT_NAME}" > "\${CHECKSUM_NAME}"
+
+                            NEXUS_RAW_ENDPOINT="http://10.0.0.182:8081/repository/raw-hosted/sensor-gateway/\${BUILD_NUMBER}"
+
+                            echo "--> Uploading binary package to Nexus: \${NEXUS_RAW_ENDPOINT}/\${ARTIFACT_NAME}"
+                            curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
+                              --upload-file "\${ARTIFACT_NAME}" \
+                              "\${NEXUS_RAW_ENDPOINT}/\${ARTIFACT_NAME}"
+
+                            echo "--> Uploading SHA-256 verification hash: \${NEXUS_RAW_ENDPOINT}/\${CHECKSUM_NAME}"
+                            curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
+                              --upload-file "\${CHECKSUM_NAME}" \
+                              "\${NEXUS_RAW_ENDPOINT}/\${CHECKSUM_NAME}"
+
+                            echo "--> Nexus raw upload completed and verified."
+                        """
+                    }
+                }
+            }
+            post {
+                always {
+                    sh "rm -rf release_dist publish_raw"
+                }
+            }
+    }
+
     post {
         always {
             cleanWs notFailBuild: true
