@@ -33,8 +33,10 @@ pipeline {
                         returnStdout: true
                     ).trim() + "/workspace/${JOB_NAME}"
 
+                    // Pass current agent UID/GID so generated files are owned by jenkins, avoiding root lockouts
                     sh """
                         docker run --rm \
+                          --user "\$(id -u):\$(id -g)" \
                           -v "${hostWorkspace}:/workspace" \
                           -w /workspace \
                           --tmpfs /tmp:rw,exec,nosuid,size=1024m \
@@ -173,7 +175,8 @@ pipeline {
             }
             post {
                 always {
-                    sh "rm -rf release_dist publish_raw"
+                    // Safe cleanup: execute as the host workspace user
+                    sh "rm -rf release_dist publish_raw || true"
                 }
             }
         }
