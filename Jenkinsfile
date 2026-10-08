@@ -1,9 +1,10 @@
 pipeline {
     agent any
-    
-    // Poll GitHub every 5 minutes for new commits
+
     triggers {
-        pollSCM('H/5 * * * *')
+        // Instant trigger on GitHub Webhook push
+        githubPush() // GitHub Webhook
+        pollSCM('H/5 * * * *') // Poll GitHub every 5 minutes for new commits
     }
 
     environment {
@@ -96,6 +97,35 @@ pipeline {
             }
         }
 
+        stage('Static Analysis & Supply-Chain Audit') {
+            steps {
+                script {
+                    def hostWorkspace = sh(
+                        script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
+                        returnStdout: true
+                    ).trim() + "/workspace/${JOB_NAME}"
+
+                    sh """
+                        docker run --rm \
+                          --user "\$(id -u):\$(id -g)" \
+                          -v "${hostWorkspace}:/workspace" \
+                          -w /workspace \
+                          --tmpfs /tmp:rw,exec,nosuid,size=1024m \
+                          -e HOME=/tmp \
+                          -e DOTNET_CLI_HOME=/tmp/.dotnet \
+                          -e NUGET_PACKAGES=/tmp/.nuget/packages \
+                          -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+                          ${DOTNET_IMAGE} \
+                          bash -c '
+                            set -euo pipefail
+                            echo "--> [SCA Gate] Checking for vulnerable transitive dependencies..."
+                            dotnet list MissionControl.sln package --vulnerable --include-transitive
+                          '
+                    """
+                }
+            }
+        }
+
         stage('Multi-Stage Container Packaging') {
             steps {
                 sh """
@@ -115,6 +145,21 @@ pipeline {
                       -t ${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT} \
                       -t ${IMAGE_NAME}:latest \
                       -
+                """
+            }
+        }
+
+        stage('Container Image Security Scan') {
+            steps {
+                sh """
+                    echo "--> [V&V Gate] Scanning container image for OS and runtime CVEs..."
+                    docker run --rm \
+                      -v /var/run/docker.sock:/var/run/docker.sock \
+                      aquasec/trivy:latest image \
+                      --severity HIGH,CRITICAL \
+                      --exit-code 0 \
+                      --format table \
+                      ${IMAGE_NAME}:latest
                 """
             }
         }

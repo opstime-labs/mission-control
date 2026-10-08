@@ -4,25 +4,39 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <!-- Defence Strictness: Zero Warning Tolerance -->
+    <!-- Controlled Goods Baseline: Zero Compiler Warning Tolerance -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
-    <!-- Suppress HTTP package source warning for internal homelab Nexus feed -->
-    <NoWarn>$(NoWarn);NU1803</NoWarn>
-
-    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!-- Static Analysis & SAST Configuration -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-all</AnalysisLevel>
+    <AnalysisMode>AllEnabledByDefault</AnalysisMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
-    <!-- Controlled Baseline: Strip local host paths for bit-for-bit determinism -->
+    <!-- Supply-Chain Vulnerability Audit (NuGet SCA) -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>moderate</NuGetAuditLevel>
+    <!-- Promote NuGet security advisory alerts into build-breaking errors -->
+    <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
+
+    <!-- Audit Traceability & Bit-for-Bit Determinism -->
     <Deterministic>true</Deterministic>
-    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
-    
-    <!-- NuGet Lockfile Configuration -->
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true' Or '$(ContinuousIntegrationBuild)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- NuGet Lockfile Controls -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
 
-    <!-- Support both AnyCPU portable dev and linux-x64 container runtime -->
-    <RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>
-
+    <!-- Suppress HTTP warning strictly for internal lab Nexus proxy (Flag for TLS in Prod) -->
+    <NoWarn>$(NoWarn);NU1803</NoWarn>
   </PropertyGroup>
+
+  <!-- Roslyn Security & Code Quality Analyzers -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="8.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
 </Project>
