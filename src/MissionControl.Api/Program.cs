@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddEndpointsApiExplorer();
@@ -21,8 +22,8 @@ app.MapGet("/weatherforecast", () =>
         new MissionTelemetry
         (
             DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            MissionTelemetryData.Summaries[Random.Shared.Next(MissionTelemetryData.Summaries.Length)]
+            RandomNumberGenerator.GetInt32(-20, 56),
+            MissionTelemetryData.Summaries[RandomNumberGenerator.GetInt32(0, MissionTelemetryData.Summaries.Length)]
         ))
         .ToArray();
     return forecast;
