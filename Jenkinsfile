@@ -52,6 +52,7 @@ pipeline {
                               -e PATH="/tmp/tools:\$PATH" \
                               -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
                               -e ContinuousIntegrationBuild=true \
+                              -e SONAR_TOKEN="${SONAR_TOKEN}" \
                               ${DOTNET_IMAGE} \
                               bash -c '
                                 set -euo pipefail
@@ -111,6 +112,7 @@ pipeline {
                 }
             }
         }
+        
         stage('Static Analysis & Supply-Chain Audit') {
             steps {
                 script {
