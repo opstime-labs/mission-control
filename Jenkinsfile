@@ -25,7 +25,7 @@ pipeline {
             }
         }
 
-        stage('.NET Deterministic Restore, Build & Test') {
+        stage('.NET Deterministic Restore, Build, Test & Raw Publish') {
             steps {
                 script {
                     def hostWorkspace = sh(
@@ -69,6 +69,15 @@ pipeline {
                               --no-build \
                               --logger "trx;LogFileName=test_results.trx" \
                               --results-directory /workspace/TestResults
+
+                            echo "--> [V&V Package] Compiling immutable framework-dependent binaries for Raw Distribution..."
+                            rm -rf /workspace/publish_raw
+                            dotnet publish src/MissionControl.Api/MissionControl.Api.csproj \
+                              -c Release \
+                              --no-restore \
+                              -o /workspace/publish_raw \
+                              /p:ContinuousIntegrationBuild=true \
+                              /p:UseAppHost=false
                           '
                     """
                 }
@@ -86,6 +95,7 @@ pipeline {
                     echo "--> Sanitizing build context and streaming to Docker daemon..."
                     tar --exclude='.git' \
                         --exclude='TestResults' \
+                        --exclude='publish_raw' \
                         --exclude='bin' \
                         --exclude='obj' \
                         --exclude='*/bin' \
@@ -128,70 +138,37 @@ pipeline {
 
         stage('Publish Raw Binary Package to Nexus') {
             steps {
-                script {
-                    def hostWorkspace = sh(
-                        script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
-                        returnStdout: true
-                    ).trim() + "/workspace/${JOB_NAME}"
-
+                withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
-                        docker run --rm \
-                          -v "${hostWorkspace}:/workspace" \
-                          -w /workspace \
-                          --tmpfs /tmp:rw,exec,nosuid,size=1024m \
-                          -e HOME=/tmp \
-                          -e DOTNET_CLI_HOME=/tmp/.dotnet \
-                          -e NUGET_PACKAGES=/tmp/.nuget/packages \
-                          -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
-                          -e DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
-                          -e DOTNET_NOLOGO=true \
-                          -e ContinuousIntegrationBuild=true \
-                          ${DOTNET_IMAGE} \
-                          bash -c '
-                            set -euo pipefail
-                            echo "--> [V&V Package] Compiling immutable framework-dependent binaries..."
-                            rm -rf /workspace/publish_raw
-                            dotnet publish src/MissionControl.Api/MissionControl.Api.csproj \
-                              -c Release \
-                              --no-restore \
-                              -o /workspace/publish_raw \
-                              /p:ContinuousIntegrationBuild=true \
-                              /p:UseAppHost=false
-                          '
+                        set -euo pipefail
+
+                        RELEASE_DIR="release_dist"
+                        mkdir -p "\${RELEASE_DIR}"
+
+                        ARTIFACT_NAME="mission-control-api-\${BUILD_NUMBER}-\${GIT_COMMIT_SHORT}.tar.gz"
+                        CHECKSUM_NAME="\${ARTIFACT_NAME}.sha256"
+
+                        echo "--> Packaging binary release tarball from publish_raw..."
+                        tar -czf "\${RELEASE_DIR}/\${ARTIFACT_NAME}" -C /var/jenkins_home/workspace/${JOB_NAME}/publish_raw .
+
+                        echo "--> Computing cryptographic SHA-256 baseline manifest..."
+                        cd "\${RELEASE_DIR}"
+                        sha256sum "\${ARTIFACT_NAME}" > "\${CHECKSUM_NAME}"
+
+                        UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/\${BUILD_NUMBER}"
+
+                        echo "--> Uploading binary package to Nexus Raw: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
+                        curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
+                          --upload-file "\${ARTIFACT_NAME}" \
+                          "\${UPLOAD_URL}/\${ARTIFACT_NAME}"
+
+                        echo "--> Uploading SHA-256 verification hash: \${UPLOAD_URL}/\${CHECKSUM_NAME}"
+                        curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
+                          --upload-file "\${CHECKSUM_NAME}" \
+                          "\${UPLOAD_URL}/\${CHECKSUM_NAME}"
+
+                        echo "--> Nexus raw upload completed and verified."
                     """
-
-                    withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                        sh """
-                            set -euo pipefail
-
-                            RELEASE_DIR="release_dist"
-                            mkdir -p "\${RELEASE_DIR}"
-
-                            ARTIFACT_NAME="mission-control-api-\${BUILD_NUMBER}-\${GIT_COMMIT_SHORT}.tar.gz"
-                            CHECKSUM_NAME="\${ARTIFACT_NAME}.sha256"
-
-                            echo "--> Packaging binary release tarball..."
-                            tar -czf "\${RELEASE_DIR}/\${ARTIFACT_NAME}" -C /var/jenkins_home/workspace/${JOB_NAME}/publish_raw .
-
-                            echo "--> Computing cryptographic SHA-256 baseline manifest..."
-                            cd "\${RELEASE_DIR}"
-                            sha256sum "\${ARTIFACT_NAME}" > "\${CHECKSUM_NAME}"
-
-                            UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/\${BUILD_NUMBER}"
-
-                            echo "--> Uploading binary package to Nexus Raw: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
-                            curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
-                              --upload-file "\${ARTIFACT_NAME}" \
-                              "\${UPLOAD_URL}/\${ARTIFACT_NAME}"
-
-                            echo "--> Uploading SHA-256 verification hash: \${UPLOAD_URL}/\${CHECKSUM_NAME}"
-                            curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
-                              --upload-file "\${CHECKSUM_NAME}" \
-                              "\${UPLOAD_URL}/\${CHECKSUM_NAME}"
-
-                            echo "--> Nexus raw upload completed and verified."
-                        """
-                    }
                 }
             }
             post {
