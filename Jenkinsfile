@@ -72,6 +72,11 @@ pipeline {
                     """
                 }
             }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
+                }
+            }
         }
 
         stage('Multi-Stage Container Packaging') {
@@ -95,15 +100,38 @@ pipeline {
                 """
             }
         }
+
+        stage('Publish to Nexus Registry') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    sh """
+                        set -euo pipefail
+
+                        echo "--> Logging into Nexus Docker Registry: ${REGISTRY_HOST}..."
+                        echo "\$NEXUS_PASS" | docker login -u "\$NEXUS_USER" --password-stdin "${REGISTRY_HOST}"
+
+                        echo "--> Tagging release image for private registry..."
+                        docker tag "${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" "${REGISTRY_HOST}/${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+                        docker tag "${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" "${REGISTRY_HOST}/${IMAGE_NAME}:latest"
+
+                        echo "--> Pushing immutable container artifact to Nexus..."
+                        docker push "${REGISTRY_HOST}/${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+                        docker push "${REGISTRY_HOST}/${IMAGE_NAME}:latest"
+
+                        echo "--> Logging out from Nexus..."
+                        docker logout "${REGISTRY_HOST}"
+                    """
+                }
+            }
+        }
     }
 
     post {
         always {
-            // Clean workspace cleanly without deferred locks
             cleanWs notFailBuild: true
         }
         success {
-            echo "SUCCESS: Baseline verified and containerized: ${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+            echo "SUCCESS: Baseline verified, containerized, and published: ${REGISTRY_HOST}/${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
         }
         failure {
             echo "FAILURE: Build broken. Investigation required."
