@@ -238,4 +238,5 @@ pipeline {
             echo "FAILURE: Pipeline execution failed. Inspect stage telemetry."
         }
     }
+ }
 }
