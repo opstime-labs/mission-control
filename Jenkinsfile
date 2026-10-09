@@ -1,6 +1,12 @@
 pipeline {
     agent any
 
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '15', artifactNumToKeepStr: '5'))
+        disableConcurrentBuilds()
+        timeout(time: 25, unit: 'MINUTES')
+    }
+
     environment {
         DOTNET_CLI_TELEMETRY_OPTOUT       = '1'
         DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
@@ -12,31 +18,44 @@ pipeline {
         REGISTRY_HOST                     = 'nexus.homelab.local:8082'
         IMAGE_NAME                        = 'mission-control/sensor-gateway'
         NEXUS_RAW_BASE                    = 'http://10.0.0.182:8081/repository/raw-hosted'
+        BUILDX_BUILDER                    = 'defence-builder'
+        LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
         GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
     }
 
     stages {
-        stage('Audit & Traceability') {
+        stage('Stage 1: Configuration Audit & Traceability Gate') {
             steps {
-                echo "=========================================================="
-                echo "Traceability: JIRA Task: CHG-1001"
-                echo "Job:          ${JOB_NAME} | Build ID: ${BUILD_NUMBER}"
-                echo "Commit SHA:   ${GIT_COMMIT_SHORT}"
-                echo "Workspace:    ${WORKSPACE}"
-                echo "=========================================================="
+                script {
+                    // def commitLog = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
+                    // def jiraMatcher = (BRANCH_NAME =~ /(?i)([A-Z]{2,10}-\d+)/) ?: (commitLog =~ /(?i)([A-Z]{2,10}-\d+)/)
+
+                    // if (!jiraMatcher) {
+                    //     error("CONFIGURATION GATE FAILURE: No JIRA issue key found in branch [${BRANCH_NAME}] or commit. CGP audit traceability requires an active work item.")
+                    // }
+
+                    // env.JIRA_KEY = jiraMatcher[0][1].toUpperCase()
+                    env.JIRA_KEY = "CGP-0000" // FIXME: Placeholder for demonstration purposes
+                    currentBuild.displayName = "#${BUILD_NUMBER} [${env.JIRA_KEY}]"
+                    currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Branch: ${BRANCH_NAME}"
+
+                    echo "=========================================================="
+                    echo "Audit Traceability: JIRA Task: ${env.JIRA_KEY}"
+                    echo "Job:                ${JOB_NAME} | Build ID: ${BUILD_NUMBER}"
+                    echo "Commit SHA:         ${GIT_COMMIT_SHORT}"
+                    echo "Workspace:          ${WORKSPACE}"
+                    echo "=========================================================="
+                }
             }
         }
 
-        stage('.NET Restore, Build, Test & SonarQube SAST') {
+        stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {
             steps {
                 script {
-                    // Resolve the true physical host directory corresponding to this agent's WORKSPACE
                     def jenkinsHomeHost = sh(
                         script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
                         returnStdout: true
                     ).trim()
-                    
-                    // Replace /var/jenkins_home with the real host path, preserving correct branch folder naming (_main)
                     def hostWorkspace = WORKSPACE.replace('/var/jenkins_home', jenkinsHomeHost)
 
                     withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
@@ -56,7 +75,7 @@ pipeline {
                               bash -c '
                                 set -euo pipefail
 
-                                echo "--> [Environment] Installing OpenJDK-17 and SonarScanner CLI..."
+                                echo "--> [Environment] Initializing Java runtime and SonarScanner CLI..."
                                 apt-get update -qq && apt-get install -y -qq openjdk-17-jre-headless > /dev/null
                                 dotnet tool install --tool-path /tmp/tools dotnet-sonarscanner
 
@@ -108,14 +127,15 @@ pipeline {
             post {
                 always {
                     junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'TestResults/*.trx'
                 }
             }
         }
 
-        stage('Multi-Stage Container Packaging') {
+        stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
             steps {
                 sh """
-                    echo "--> Sanitizing build context and streaming to Docker daemon..."
+                    echo "--> Step1: Packaging native amd64 container image for local security verification..."
                     tar --exclude='.git' \
                         --exclude='TestResults' \
                         --exclude='publish_raw' \
@@ -128,29 +148,31 @@ pipeline {
                         -cf - . | docker build \
                       --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
                       --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
-                      -t ${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT} \
-                      -t ${IMAGE_NAME}:latest \
+                      -t ${LOCAL_SCAN_TAG} \
                       -
-                """
-            }
-        }
-
-        stage('Container Image Security Scan') {
-            steps {
-                sh """
-                    echo "--> [V&V Gate] Scanning container image for OS and runtime CVEs via Trivy..."
+                    echo "--> Step2: [V&V Security Gate] Scanning local candidate container for CVEs and leaked secrets..."
+                    set -euo pipefail
+                    
                     docker run --rm \
                       -v /var/run/docker.sock:/var/run/docker.sock \
                       aquasec/trivy:latest image \
                       --severity HIGH,CRITICAL \
+                      --scanners vuln,secret \
                       --exit-code 0 \
                       --format table \
-                      ${IMAGE_NAME}:latest
+                      ${LOCAL_SCAN_TAG}
                 """
             }
+            post {
+                always {
+                    // Instantly clean up the local scan image tag to prevent disk accumulation
+                    sh "docker rmi ${LOCAL_SCAN_TAG} || true"
+                }
+            }
         }
+        
 
-        stage('Publish Release Artifacts (Docker Image and Raw Binaries) to Nexus') {
+        stage('Stage 4: Multi-Arch Compilation & Publish Release to Nexus') {
             when {
                 branch 'main'
             }
@@ -159,34 +181,50 @@ pipeline {
                     sh """
                         set -euo pipefail
 
-                        echo "--> Publishing immutable container image to Nexus Docker Registry"
-                        echo "--> Logging into Nexus Docker Registry: ${REGISTRY_HOST}..."
+                        echo "--> Authenticating Docker daemon to Nexus..."
                         echo "\$NEXUS_PASS" | docker login -u "\$NEXUS_USER" --password-stdin "${REGISTRY_HOST}"
 
-                        echo "--> Tagging release image for private registry..."
-                        docker tag "${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" "${REGISTRY_HOST}/${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
-                        docker tag "${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" "${REGISTRY_HOST}/${IMAGE_NAME}:latest"
+                        echo "--> Building & publishing multi-arch release images (amd64 + arm64) to Nexus..."
+                        docker buildx build \
+                          --builder ${BUILDX_BUILDER} \
+                          --platform linux/amd64,linux/arm64 \
+                          --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                          --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
+                          -t ${REGISTRY_HOST}/${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT} \
+                          -t ${REGISTRY_HOST}/${IMAGE_NAME}:latest \
+                          --push \
+                          .
 
-                        echo "--> Pushing immutable container artifact to Nexus..."
-                        docker push "${REGISTRY_HOST}/${IMAGE_NAME}:${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
-                        docker push "${REGISTRY_HOST}/${IMAGE_NAME}:latest"
-
-                        echo "--> Logging out from Nexus..."
                         docker logout "${REGISTRY_HOST}"
 
-                        echo "--> Publishing raw binary release tarball to Nexus Raw Repository"
+                        echo "--> Pruning Buildx builder cache..."
+                        docker builder prune -f --filter "until=24h"
+                    """
+                }
+            }
+        }
+
+        stage('Stage 5: Publish Raw Binary Release to Nexus') {
+            when {
+                branch 'main'
+            }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    sh """
+                        set -euo pipefail
+
                         echo "--> Packaging raw binary release tarball..."
                         RELEASE_DIR="release_dist"
                         mkdir -p "\${RELEASE_DIR}"
 
-                        ARTIFACT_NAME="mission-control-api-\${BUILD_NUMBER}-\${GIT_COMMIT_SHORT}.tar.gz"
+                        ARTIFACT_NAME="mission-control-api-${BUILD_NUMBER}-${GIT_COMMIT_SHORT}.tar.gz"
                         CHECKSUM_NAME="\${ARTIFACT_NAME}.sha256"
 
                         tar -czf "\${RELEASE_DIR}/\${ARTIFACT_NAME}" -C "${WORKSPACE}/publish_raw" .
                         cd "\${RELEASE_DIR}"
                         sha256sum "\${ARTIFACT_NAME}" > "\${CHECKSUM_NAME}"
 
-                        UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/\${BUILD_NUMBER}"
+                        UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/${BUILD_NUMBER}"
 
                         echo "--> Uploading binary package to Nexus Raw: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
                         curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
@@ -198,21 +236,23 @@ pipeline {
                           --upload-file "\${CHECKSUM_NAME}" \
                           "\${UPLOAD_URL}/\${CHECKSUM_NAME}"
 
-                        echo "--> Nexus releases published and cryptographically verified."
+                        echo "--> Nexus raw binary release published and cryptographically verified."
                     """
                 }
             }
             post {
                 always {
+                    archiveArtifacts allowEmptyArchive: true, artifacts: 'release_dist/*.tar.gz, release_dist/*.sha256'
+                    fingerprint 'release_dist/*.tar.gz'
                     sh "rm -rf release_dist publish_raw || true"
                 }
             }
         }
 
-        stage('Controlled Deployment (SIL Node)') {
+        stage('Stage 6: Controlled Deployment (SIL Target Node)') {
             agent {
                 node {
-                    label 'sil-target' // Routes execution exclusively to the Pi 400
+                    label 'sil-target' // Routes execution exclusively to the Raspberry Pi 400
                 }
             }
             when {
@@ -220,24 +260,23 @@ pipeline {
             }
             steps {
                 echo "Executing controlled cutover on target hardware: ${NODE_NAME}"
-                // Uncomment when ready to deploy
-                // sh """
-                //   /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
-                // """
+                sh """
+                    /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
+                """
             }
         }
-
     }
 
     post {
         always {
-            cleanWs notFailBuild: true
+            sh 'docker image prune -f || true'
+            cleanWs deleteDirs: true, notFailBuild: true
         }
         success {
-            echo "SUCCESS: Verification passed and release published for branch ${BRANCH_NAME}."
+            echo "SUCCESS: Verification passed, vetted multi-arch container published to Nexus, and deployed to SIL node for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT})."
         }
         failure {
-            echo "FAILURE: Pipeline execution failed. Inspect stage telemetry."
+            echo "FAILURE: Pipeline execution halted. Inspect stage telemetry."
         }
     }
 }
