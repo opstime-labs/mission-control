@@ -138,7 +138,8 @@ pipeline {
                     set -euo pipefail
 
                     echo "--> Step 1: Building local amd64 container for security quarantine gate..."
-                    docker build \
+                    docker buildx build \
+                      --load \
                       --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
                       --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
                       -t ${LOCAL_SCAN_TAG} \
