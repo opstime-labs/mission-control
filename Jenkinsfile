@@ -208,24 +208,24 @@ pipeline {
                 }
             }
         }
-    }
+    
 
-    stage('Controlled Deployment (SIL Node)') {
-            agent {
-                node {
-                    label 'sil-target' // Routes execution exclusively to the Pi 400
+        stage('Controlled Deployment (SIL Node)') {
+                agent {
+                    node {
+                        label 'sil-target' // Routes execution exclusively to the Pi 400
+                    }
                 }
-            }
-            when {
-                branch 'main'
-            }
-            steps {
-                echo "Executing controlled cutover on target hardware: ${NODE_NAME}"
-                sh """
-                    /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
-                """
-            }
-    }
+                when {
+                    branch 'main'
+                }
+                steps {
+                    echo "Executing controlled cutover on target hardware: ${NODE_NAME}"
+                    sh """
+                        /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
+                    """
+                }
+        }
 
     post {
         always {
