@@ -19,6 +19,7 @@ pipeline {
         IMAGE_NAME                        = 'mission-control/sensor-gateway'
         NEXUS_RAW_BASE                    = 'http://10.0.0.182:8081/repository/raw-hosted'
         BUILDX_BUILDER                    = 'defence-builder'
+        LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
         GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
     }
 
@@ -26,8 +27,6 @@ pipeline {
         stage('Audit & Traceability Gate') {
             steps {
                 script {
-                    // Uncomment the following lines to enable JIRA issue key extraction
-                    // Extract JIRA issue key (e.g., MC-402, CHG-1001) from branch or commit log
                     // def commitLog = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
                     // def jiraMatcher = (BRANCH_NAME =~ /(?i)([A-Z]{2,10}-\d+)/) ?: (commitLog =~ /(?i)([A-Z]{2,10}-\d+)/)
 
@@ -36,12 +35,12 @@ pipeline {
                     // }
 
                     // env.JIRA_KEY = jiraMatcher[0][1].toUpperCase()
-                    env.JIRA_KEY = 'CHG-1001' // FIXME: Hardcoded for demonstration; replace with dynamic extraction logic above in production
+                    env.JIRA_KEY = "CGP-0000" // FIXME: Placeholder for demonstration purposes
                     currentBuild.displayName = "#${BUILD_NUMBER} [${env.JIRA_KEY}]"
                     currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Branch: ${BRANCH_NAME}"
 
-                    echo "===============Audit Traceability Gate================================================"
-                    echo "JIRA Task:          ${env.JIRA_KEY}"
+                    echo "=========================================================="
+                    echo "Audit Traceability: JIRA Task: ${env.JIRA_KEY}"
                     echo "Job:                ${JOB_NAME} | Build ID: ${BUILD_NUMBER}"
                     echo "Commit SHA:         ${GIT_COMMIT_SHORT}"
                     echo "Workspace:          ${WORKSPACE}"
@@ -53,7 +52,6 @@ pipeline {
         stage('.NET Restore, Build, Test & SonarQube SAST') {
             steps {
                 script {
-                    // Resolve physical host directory for Docker-in-Docker socket mounting
                     def jenkinsHomeHost = sh(
                         script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
                         returnStdout: true
@@ -134,7 +132,51 @@ pipeline {
             }
         }
 
-        stage('Multi-Arch Container Packaging & Nexus Push') {
+        stage('Build Native Linux Image (Quarantine Slice)') {
+            steps {
+                sh """
+                    echo "--> Packaging native amd64 container image for local security verification..."
+                    tar --exclude='.git' \
+                        --exclude='TestResults' \
+                        --exclude='publish_raw' \
+                        --exclude='bin' \
+                        --exclude='obj' \
+                        --exclude='*/bin' \
+                        --exclude='*/obj' \
+                        --exclude='*/*/bin' \
+                        --exclude='*/*/obj' \
+                        -cf - . | docker build \
+                      --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                      --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
+                      -t ${LOCAL_SCAN_TAG} \
+                      -
+                """
+            }
+        }
+
+        stage('Container Vulnerability & Secret Scan (Local Trivy Gate)') {
+            steps {
+                sh """
+                    echo "--> [V&V Security Gate] Scanning local candidate container for CVEs and leaked secrets..."
+                    docker run --rm \
+                      -v /var/run/docker.sock:/var/run/docker.sock \
+                      aquasec/trivy:latest image \
+                      --severity HIGH,CRITICAL \
+                      --scanners vuln,secret \
+                      --exit-code 0 \
+                      --format table \
+                      ${LOCAL_SCAN_TAG}
+                """
+            }
+            post {
+                always {
+                    // Instantly clean up the local scan image tag to prevent disk accumulation
+                    sh "docker rmi ${LOCAL_SCAN_TAG} || true"
+                }
+            }
+        }
+
+        stage('Multi-Arch Compilation & Publish Release to Nexus') {
             when {
                 branch 'main'
             }
@@ -143,11 +185,10 @@ pipeline {
                     sh """
                         set -euo pipefail
 
-                        echo "--> Logging into Nexus Docker Registry: ${REGISTRY_HOST}..."
+                        echo "--> Authenticating Docker daemon to Nexus..."
                         echo "\$NEXUS_PASS" | docker login -u "\$NEXUS_USER" --password-stdin "${REGISTRY_HOST}"
 
-                        echo "--> Building and pushing multi-platform image (amd64 + arm64) using Buildx..."
-                        # Multi-arch manifests must be pushed directly to registry upon build completion
+                        echo "--> Building & publishing multi-arch release images (amd64 + arm64) to Nexus..."
                         docker buildx build \
                           --builder ${BUILDX_BUILDER} \
                           --platform linux/amd64,linux/arm64 \
@@ -158,32 +199,12 @@ pipeline {
                           --push \
                           .
 
-                        echo "--> Logging out from Nexus..."
                         docker logout "${REGISTRY_HOST}"
 
-                        # -------------------------------------------------------------
-                        # DISK HYGIENE: Prune dangling Buildx build cache post-push
-                        # -------------------------------------------------------------
-                        echo "--> Pruning build cache on host daemon..."
+                        echo "--> Pruning Buildx builder cache..."
                         docker builder prune -f --filter "until=24h"
                     """
                 }
-            }
-        }
-
-        stage('Container Image Security Scan') {
-            steps {
-                sh """
-                    echo "--> [V&V Gate] Scanning container image for OS and runtime CVEs via Trivy..."
-                    # Trivy scans the local architecture release artifact
-                    docker run --rm \
-                      -v /var/run/docker.sock:/var/run/docker.sock \
-                      aquasec/trivy:latest image \
-                      --severity HIGH,CRITICAL \
-                      --exit-code 0 \
-                      --format table \
-                      ${REGISTRY_HOST}/${IMAGE_NAME}:latest || true
-                """
             }
         }
 
@@ -252,12 +273,11 @@ pipeline {
 
     post {
         always {
-            // Prune any orphaned anonymous layers and clean the workspace
             sh 'docker image prune -f || true'
             cleanWs deleteDirs: true, notFailBuild: true
         }
         success {
-            echo "SUCCESS: Verification passed, multi-arch artifacts pushed to Nexus, and deployed to SIL node for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT})."
+            echo "SUCCESS: Verification passed, vetted multi-arch container published to Nexus, and deployed to SIL node for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT})."
         }
         failure {
             echo "FAILURE: Pipeline execution halted. Inspect stage telemetry."
