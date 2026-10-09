@@ -167,7 +167,7 @@ pipeline {
         }
         
 
-        stage('Stage 4: Multi-Arch Compilation & Publish Release to Nexus') {
+        stage('Multi-Arch Compilation & Publish Release to Nexus') {
             when {
                 branch 'main'
             }
@@ -179,9 +179,11 @@ pipeline {
                         echo "--> Authenticating Docker daemon to Nexus..."
                         echo "\$NEXUS_PASS" | docker login -u "\$NEXUS_USER" --password-stdin "${REGISTRY_HOST}"
 
+                        echo "--> Ensuring active builder instance..."
+                        docker buildx use defence-builder
+
                         echo "--> Building & publishing multi-arch release images (amd64 + arm64) to Nexus..."
                         docker buildx build \
-                          --builder ${BUILDX_BUILDER} \
                           --platform linux/amd64,linux/arm64 \
                           --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
                           --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
