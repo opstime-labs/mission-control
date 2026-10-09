@@ -132,35 +132,32 @@ pipeline {
             }
         }
 
-        stage('Build Native Linux Image & Vulnerability Scan') {
+        stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
             steps {
                 sh """
                     set -euo pipefail
 
-                    echo "--> Step 1: Building local amd64 container for security quarantine gate..."
+                    echo "--> Step 1: Packaging candidate container image..."
                     docker build \
                       --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
                       --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
                       -t ${LOCAL_SCAN_TAG} \
                       -f Dockerfile .
 
-                    echo "--> Verifying image exists in local Docker engine..."
-                    docker image inspect ${LOCAL_SCAN_TAG} > /dev/null
-
-                    echo "--> Step 2: [V&V Security Gate] Scanning candidate container via Trivy..."
-                    docker run --rm \
-                      -v /var/run/docker.sock:/var/run/docker.sock \
+                    echo "--> Step 2: [V&V Security Gate] Scanning candidate container via direct stream..."
+                    # Stream the raw image tar directly into Trivy: eliminates socket desync and registry fallback
+                    docker save ${LOCAL_SCAN_TAG} | docker run --rm -i \
                       aquasec/trivy:latest image \
+                      --input - \
                       --severity HIGH,CRITICAL \
                       --scanners vuln,secret \
                       --exit-code 0 \
-                      --format table \
-                      ${LOCAL_SCAN_TAG}
+                      --format table
                 """
             }
             post {
                 always {
-                    // Untag scan artifact post-scan to keep Mini PC disk clean
+                    // Clean up the candidate scan image tag
                     sh "docker rmi ${LOCAL_SCAN_TAG} || true"
                 }
             }
