@@ -36,12 +36,12 @@ pipeline {
                     // }
 
                     // env.JIRA_KEY = jiraMatcher[0][1].toUpperCase()
-                    env.JIRA_KEY = 'CHG-1001' # FIXME: Hardcoded for demonstration; replace with dynamic extraction logic above in production
+                    env.JIRA_KEY = 'CHG-1001' // FIXME: Hardcoded for demonstration; replace with dynamic extraction logic above in production
                     currentBuild.displayName = "#${BUILD_NUMBER} [${env.JIRA_KEY}]"
                     currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Branch: ${BRANCH_NAME}"
 
-                    echo "=========================================================="
-                    echo "Audit Traceability: JIRA Task: ${env.JIRA_KEY}"
+                    echo "===============Audit Traceability Gate================================================"
+                    echo "JIRA Task:          ${env.JIRA_KEY}"
                     echo "Job:                ${JOB_NAME} | Build ID: ${BUILD_NUMBER}"
                     echo "Commit SHA:         ${GIT_COMMIT_SHORT}"
                     echo "Workspace:          ${WORKSPACE}"
