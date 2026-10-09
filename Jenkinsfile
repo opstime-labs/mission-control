@@ -132,27 +132,22 @@ pipeline {
             }
         }
 
-        stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
+        stage('Build Native Linux Image & Vulnerability Scan') {
             steps {
                 sh """
-                    echo "--> Step1: Packaging native amd64 container image for local security verification..."
-                    tar --exclude='.git' \
-                        --exclude='TestResults' \
-                        --exclude='publish_raw' \
-                        --exclude='bin' \
-                        --exclude='obj' \
-                        --exclude='*/bin' \
-                        --exclude='*/obj' \
-                        --exclude='*/*/bin' \
-                        --exclude='*/*/obj' \
-                        -cf - . | docker build \
+                    set -euo pipefail
+
+                    echo "--> Step 1: Building local amd64 container for security quarantine gate..."
+                    docker build \
                       --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
                       --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
                       -t ${LOCAL_SCAN_TAG} \
-                      -
-                    echo "--> Step2: [V&V Security Gate] Scanning local candidate container for CVEs and leaked secrets..."
-                    set -euo pipefail
-                    
+                      -f Dockerfile .
+
+                    echo "--> Verifying image exists in local Docker engine..."
+                    docker image inspect ${LOCAL_SCAN_TAG} > /dev/null
+
+                    echo "--> Step 2: [V&V Security Gate] Scanning candidate container via Trivy..."
                     docker run --rm \
                       -v /var/run/docker.sock:/var/run/docker.sock \
                       aquasec/trivy:latest image \
@@ -165,7 +160,7 @@ pipeline {
             }
             post {
                 always {
-                    // Instantly clean up the local scan image tag to prevent disk accumulation
+                    // Untag scan artifact post-scan to keep Mini PC disk clean
                     sh "docker rmi ${LOCAL_SCAN_TAG} || true"
                 }
             }
