@@ -24,7 +24,7 @@ pipeline {
     }
 
     stages {
-        stage('Audit & Traceability Gate') {
+        stage('Stage 1: Configuration Audit & Traceability Gate') {
             steps {
                 script {
                     // def commitLog = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
@@ -49,7 +49,7 @@ pipeline {
             }
         }
 
-        stage('.NET Restore, Build, Test & SonarQube SAST') {
+        stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {
             steps {
                 script {
                     def jenkinsHomeHost = sh(
@@ -132,10 +132,10 @@ pipeline {
             }
         }
 
-        stage('Build Native Linux Image (Quarantine Slice)') {
+        stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
             steps {
                 sh """
-                    echo "--> Packaging native amd64 container image for local security verification..."
+                    echo "--> Step1: Packaging native amd64 container image for local security verification..."
                     tar --exclude='.git' \
                         --exclude='TestResults' \
                         --exclude='publish_raw' \
@@ -150,14 +150,7 @@ pipeline {
                       --build-arg GIT_COMMIT=${GIT_COMMIT_SHORT} \
                       -t ${LOCAL_SCAN_TAG} \
                       -
-                """
-            }
-        }
-
-        stage('Container Vulnerability & Secret Scan (Local Trivy Gate)') {
-            steps {
-                sh """
-                    echo "--> [V&V Security Gate] Scanning local candidate container for CVEs and leaked secrets..."
+                    echo "--> Step2: [V&V Security Gate] Scanning local candidate container for CVEs and leaked secrets..."
                     set -euo pipefail
                     
                     docker run --rm \
@@ -177,8 +170,9 @@ pipeline {
                 }
             }
         }
+        
 
-        stage('Multi-Arch Compilation & Publish Release to Nexus') {
+        stage('Stage 4: Multi-Arch Compilation & Publish Release to Nexus') {
             when {
                 branch 'main'
             }
@@ -210,7 +204,7 @@ pipeline {
             }
         }
 
-        stage('Publish Raw Binary Release to Nexus') {
+        stage('Stage 5: Publish Raw Binary Release to Nexus') {
             when {
                 branch 'main'
             }
@@ -255,7 +249,7 @@ pipeline {
             }
         }
 
-        stage('Controlled Deployment (SIL Target Node)') {
+        stage('Stage 6: Controlled Deployment (SIL Target Node)') {
             agent {
                 node {
                     label 'sil-target' // Routes execution exclusively to the Raspberry Pi 400
