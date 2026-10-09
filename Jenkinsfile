@@ -132,7 +132,7 @@ pipeline {
             }
         }
 
-        stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
+        stage('Build Native Linux Image & Vulnerability Scan') {
             steps {
                 sh """
                     set -euo pipefail
@@ -144,11 +144,15 @@ pipeline {
                       -t ${LOCAL_SCAN_TAG} \
                       -f Dockerfile .
 
-                    echo "--> Step 2: [V&V Security Gate] Scanning candidate container via direct stream..."
-                    # Stream the raw image tar directly into Trivy: eliminates socket desync and registry fallback
-                    docker save ${LOCAL_SCAN_TAG} | docker run --rm -i \
+                    echo "--> Step 2: Exporting image tarball for isolated offline scanner input..."
+                    docker save ${LOCAL_SCAN_TAG} -o candidate-image.tar
+
+                    echo "--> Step 3: [V&V Security Gate] Scanning candidate container via Trivy..."
+                    # Mount the raw tarball directly into Trivy: completely bypasses daemon sockets & registry DNS
+                    docker run --rm \
+                      -v "\${PWD}/candidate-image.tar:/tmp/candidate-image.tar:ro" \
                       aquasec/trivy:latest image \
-                      --input - \
+                      --input /tmp/candidate-image.tar \
                       --severity HIGH,CRITICAL \
                       --scanners vuln,secret \
                       --exit-code 0 \
@@ -157,8 +161,11 @@ pipeline {
             }
             post {
                 always {
-                    // Clean up the candidate scan image tag
-                    sh "docker rmi ${LOCAL_SCAN_TAG} || true"
+                    // Clean up local container tag and temporary scan archive immediately
+                    sh """
+                        rm -f candidate-image.tar || true
+                        docker rmi ${LOCAL_SCAN_TAG} || true
+                    """
                 }
             }
         }
