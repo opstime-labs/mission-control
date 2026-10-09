@@ -242,7 +242,11 @@ pipeline {
                 always {
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'release_dist/*.tar.gz, release_dist/*.sha256'
                     fingerprint 'release_dist/*.tar.gz'
-                    sh "rm -rf release_dist publish_raw || true"
+                    
+                    // Janitor cleanup using docker container to avoid host permission blocks
+                    sh """
+                        docker run --rm -v "${WORKSPACE}:/ws" alpine sh -c "rm -rf /ws/release_dist /ws/publish_raw"
+                    """
                 }
             }
         }
