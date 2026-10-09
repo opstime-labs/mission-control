@@ -158,6 +158,8 @@ pipeline {
             steps {
                 sh """
                     echo "--> [V&V Security Gate] Scanning local candidate container for CVEs and leaked secrets..."
+                    set -euo pipefail
+                    
                     docker run --rm \
                       -v /var/run/docker.sock:/var/run/docker.sock \
                       aquasec/trivy:latest image \
