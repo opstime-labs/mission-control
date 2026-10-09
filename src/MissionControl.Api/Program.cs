@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
 var builder = WebApplication.CreateBuilder(args);
 
+// 1. Register Health Check Services
+builder.Services.AddHealthChecks();
+builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -28,6 +31,12 @@ app.MapGet("/weatherforecast", () =>
         .ToArray();
     return forecast;
 });
+
+// 2. Map the /health endpoint for deployment probes & NGINX upstream verification
+app.MapHealthChecks("/health");
+
+app.UseAuthorization();
+app.MapControllers();
 
 app.Run();
 

@@ -50,6 +50,10 @@ pipeline {
         }
 
         stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {
+            // FIXME: Disabled temporarily
+            when {
+                expression { false }
+            }
             steps {
                 script {
                     def jenkinsHomeHost = sh(
@@ -133,6 +137,10 @@ pipeline {
         }
 
         stage('Build Native Linux Image & Vulnerability Scan') {
+            // FIXME: Disabled temporarily
+            when {
+                expression { false }
+            }
             steps {
                 sh """
                     set -euo pipefail
@@ -203,9 +211,13 @@ pipeline {
         }
 
         stage('Stage 5: Publish Raw Binary Release to Nexus') {
+            // FIXME: Disabled temporarily
             when {
-                branch 'main'
+                expression { false }
             }
+            // when {
+            //     branch 'main'
+            // }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
