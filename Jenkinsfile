@@ -279,7 +279,7 @@ pipeline {
                     chmod 750 /opt/mission-control/deploy.sh
                     
                     # Execute the deployment with the deterministic image tag
-                    /opt/mission-control/deploy.sh "${DOCKER_IMAGE_TAG}"
+                    /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
                 '''
             }
         }
