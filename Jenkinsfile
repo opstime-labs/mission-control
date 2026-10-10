@@ -263,20 +263,24 @@ pipeline {
             }
         }
 
-        stage('Stage 6: Controlled Deployment (SIL Target Node)') {
-            agent {
-                node {
-                    label 'sil-target' // Routes execution exclusively to the Raspberry Pi 400
-                }
-            }
-            when {
-                branch 'main'
-            }
+        stage('Deploy to SIL Target Node') {
+            agent { 
+                label 'sil-agent-01'
+            } // Runs directly on RPi 400
             steps {
-                echo "Executing controlled cutover on target hardware: ${NODE_NAME}"
-                sh """
-                    /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
-                """
+                sh '''
+                    set -euo pipefail
+                    
+                    # Ensure the deployment directory exists on the target
+                    mkdir -p /opt/mission-control
+                    
+                    # Deploy the version-controlled script directly from workspace
+                    cp deploy/scripts/deploy.sh /opt/mission-control/deploy.sh
+                    chmod 750 /opt/mission-control/deploy.sh
+                    
+                    # Execute the deployment with the deterministic image tag
+                    /opt/mission-control/deploy.sh "${DOCKER_IMAGE_TAG}"
+                '''
             }
         }
     }
