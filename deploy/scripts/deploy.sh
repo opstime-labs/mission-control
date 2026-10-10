@@ -30,7 +30,7 @@ docker rm "mc-${TARGET}" 2>/dev/null || true
 docker run -d --name "mc-${TARGET}" --restart unless-stopped -p "${TARGET_PORT}:8080" "${IMAGE}"
 
 # Health Probe Verification
-echo "--> Verifying health on port ${TARGET_PORT}..."
+echo "--> Verifying health on port ${TARGET_PORT}: http://127.0.0.1:${TARGET_PORT}/health"
 HEALTH_PASSED=false
 for i in {1..10}; do
     STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${TARGET_PORT}/health" || echo "000")
