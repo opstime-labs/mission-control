@@ -6,6 +6,14 @@ pipeline {
         disableConcurrentBuilds()
         timeout(time: 25, unit: 'MINUTES')
     }
+    parameters {
+        // Creates a checkbox in the Jenkins UI
+        booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: false, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
+        booleanParam(name: 'PUBLISH_DOCKER_IMAGE', defaultValue: true, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
+        booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
+        booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
+        booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: true, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
+    }
 
     environment {
         DOTNET_CLI_TELEMETRY_OPTOUT       = '1'
@@ -22,11 +30,11 @@ pipeline {
         LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
         GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
 
-        BUILD_SCAN_TEST_ENABLE            = 'true'        
-        PUBLISH_RAW_RELEASE_ARTIFACTS     = 'false'
-        PUBLISH_DOCKER_IMAGE              = 'true'        
-        RUN_IMAGE_VULN_SCAN               = 'false'
-        DEPLOY_TO_SIL                     = 'true'
+        // BUILD_SCAN_TEST_ENABLE            = 'true'        
+        // PUBLISH_RAW_RELEASE_ARTIFACTS     = 'false'
+        // PUBLISH_DOCKER_IMAGE              = 'true'        
+        // RUN_IMAGE_VULN_SCAN               = 'false'
+        // DEPLOY_TO_SIL                     = 'true'
         DEPLOY_SIL_AGENT_NAME             = 'sil-agent-01'       
         BUILD_AGENT_NAME                  = 'builtin'
         //BRANCH_NAME                       = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()        
