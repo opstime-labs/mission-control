@@ -12,7 +12,7 @@ pipeline {
         DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
         DOTNET_NOLOGO                     = 'true'
         ContinuousIntegrationBuild        = 'true'
-        DOTNET_IMAGE                      = 'mcr.microsoft.com/dotnet/sdk:8.0-jammy'
+        DOTNET_SDK_IMAGE                  = 'mcr.microsoft.com/dotnet/sdk:8.0-jammy'
         SONAR_HOST_URL                    = 'http://10.0.0.182:9000'
         SONAR_PROJECT_KEY                 = 'mission-control-api'
         REGISTRY_HOST                     = 'nexus.homelab.local:8082'
@@ -21,6 +21,15 @@ pipeline {
         BUILDX_BUILDER                    = 'defence-builder'
         LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
         GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+
+        BUILD_SCAN_TEST_ENABLE            = 'false'        
+        PUBLISH_RAW_RELEASE_ARTIFACTS     = 'false'
+        PUBLISH_DOCKER_IMAGE              = 'true'        
+        RUN_IMAGE_VULN_SCAN               = 'false'
+        DEPLOY_TO_SIL                     = 'true'
+        DEPLOY_SIL_AGENT_NAME             = 'sil-agent-01'       
+        BUILD_AGENT_NAME                  = 'builtin'
+        BRANCH_NAME                       = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()        
     }
 
     stages {
@@ -49,10 +58,14 @@ pipeline {
             }
         }
 
-        stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {
-            // FIXME: Disabled temporarily
+        stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {                        
             when {
-                expression { false }
+                beforeAgent true
+                allOf {
+                    // expression { false }
+                    expression { env.BUILD_SCAN_TEST_ENABLE == 'true' }
+                    branch 'main'
+                }
             }
             steps {
                 script {
@@ -60,7 +73,7 @@ pipeline {
                         script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
                         returnStdout: true
                     ).trim()
-                    def hostWorkspace = WORKSPACE.replace('/var/jenkins_home', jenkinsHomeHost)
+                    def hostWorkspace = WORKSPACE.replace('/var/jenkins_home', jenkinsHomeHost)                    
 
                     withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                         sh """
@@ -75,7 +88,7 @@ pipeline {
                               -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
                               -e ContinuousIntegrationBuild=true \
                               -e SONAR_TOKEN="${SONAR_TOKEN}" \
-                              ${DOTNET_IMAGE} \
+                              ${DOTNET_SDK_IMAGE} \
                               bash -c '
                                 set -euo pipefail
 
@@ -136,10 +149,14 @@ pipeline {
             }
         }
 
-        stage('Build Native Linux Image & Vulnerability Scan') {
-            // FIXME: Disabled temporarily
+        stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
             when {
-                expression { false }
+                beforeAgent true
+                allOf {
+                    // expression { false }
+                    expression { env.RUN_IMAGE_VULN_SCAN == 'true' }
+                    branch 'main'
+                }
             }
             steps {
                 sh """
@@ -176,9 +193,14 @@ pipeline {
         }
         
 
-        stage('Multi-Arch Compilation & Publish Release to Nexus') {
+        stage('Stage 4: Multi-Arch Compilation & Publish Docker Image to Nexus') {
             when {
-                branch 'main'
+                beforeAgent true
+                allOf {
+                    // expression { false }
+                    expression { env.PUBLISH_DOCKER_IMAGE == 'true' }
+                    branch 'main'
+                }
             }
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
@@ -210,14 +232,16 @@ pipeline {
             }
         }
 
-        stage('Stage 5: Publish Raw Binary Release to Nexus') {
-            // FIXME: Disabled temporarily
+        stage('Stage 5: Publish Raw Binary Release to Nexus') {            
             when {
-                expression { false }
+                beforeAgent true
+                allOf {
+                    // expression { false }
+                    expression { env.PUBLISH_RAW_RELEASE_ARTIFACTS == 'true' }
+                    branch 'main'
+                }
             }
-            // when {
-            //     branch 'main'
-            // }
+            
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
@@ -263,10 +287,21 @@ pipeline {
             }
         }
 
-        stage('Deploy to SIL Target Node') {
+        stage('Stage 6: Deploy to SIL Target Node') {
+            when {
+                beforeAgent true
+                allOf {
+                    // expression { false }
+                    expression { env.DEPLOY_TO_SIL == 'true' }
+                    branch 'main'
+                }
+            }
+
             agent { 
-                label 'sil-agent-01'
+                //label 'sil-agent-01'
+                label env.DEPLOY_SIL_AGENT_NAME
             } // Runs directly on RPi 400
+
             steps {
                 sh '''
                     set -euo pipefail
