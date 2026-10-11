@@ -22,7 +22,7 @@ pipeline {
         LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
         GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
 
-        BUILD_SCAN_TEST_ENABLE            = 'false'        
+        BUILD_SCAN_TEST_ENABLE            = 'true'        
         PUBLISH_RAW_RELEASE_ARTIFACTS     = 'false'
         PUBLISH_DOCKER_IMAGE              = 'true'        
         RUN_IMAGE_VULN_SCAN               = 'false'
@@ -62,7 +62,6 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    // expression { false }
                     expression { env.BUILD_SCAN_TEST_ENABLE == 'true' }
                     branch 'main'
                 }
@@ -153,7 +152,6 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    // expression { false }
                     expression { env.RUN_IMAGE_VULN_SCAN == 'true' }
                     branch 'main'
                 }
@@ -236,7 +234,6 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    // expression { false }
                     expression { env.PUBLISH_RAW_RELEASE_ARTIFACTS == 'true' }
                     branch 'main'
                 }
@@ -291,7 +288,6 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    // expression { false }
                     expression { env.DEPLOY_TO_SIL == 'true' }
                     branch 'main'
                 }
