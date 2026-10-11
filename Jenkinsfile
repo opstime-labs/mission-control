@@ -70,7 +70,8 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { env.BUILD_SCAN_TEST_ENABLE == 'true' }
+                    //expression { env.BUILD_SCAN_TEST_ENABLE == 'true' }
+                    expression { params.BUILD_SCAN_TEST_ENABLE == true }
                     branch 'main'
                 }
             }
@@ -160,7 +161,8 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { env.RUN_IMAGE_VULN_SCAN == 'true' }
+                    //expression { env.RUN_IMAGE_VULN_SCAN == 'true' }
+                    expression { params.RUN_IMAGE_VULN_SCAN == true }
                     branch 'main'
                 }
             }
@@ -203,7 +205,8 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { env.PUBLISH_DOCKER_IMAGE == 'true' }
+                    //expression { env.PUBLISH_DOCKER_IMAGE == 'true' }
+                    expression { params.PUBLISH_DOCKER_IMAGE == true }
                     branch 'main'
                 }
             }
@@ -242,7 +245,8 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { env.PUBLISH_RAW_RELEASE_ARTIFACTS == 'true' }
+                    //expression { env.PUBLISH_RAW_RELEASE_ARTIFACTS == 'true' }
+                    expression { params.PUBLISH_RAW_RELEASE_ARTIFACTS == true }
                     branch 'main'
                 }
             }
@@ -296,7 +300,8 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { env.DEPLOY_TO_SIL == 'true' }
+                    //expression { env.DEPLOY_TO_SIL == 'true' }
+                    expression { params.DEPLOY_TO_SIL == true }
                     branch 'main'
                 }
             }
