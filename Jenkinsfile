@@ -29,7 +29,7 @@ pipeline {
         DEPLOY_TO_SIL                     = 'true'
         DEPLOY_SIL_AGENT_NAME             = 'sil-agent-01'       
         BUILD_AGENT_NAME                  = 'builtin'
-        BRANCH_NAME                       = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()        
+        //BRANCH_NAME                       = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()        
     }
 
     stages {
@@ -197,11 +197,11 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    // expression { false }
                     expression { env.PUBLISH_DOCKER_IMAGE == 'true' }
                     branch 'main'
                 }
             }
+
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
