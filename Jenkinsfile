@@ -44,24 +44,23 @@ pipeline {
         stage('Stage 1: Configuration Audit & Traceability Gate') {
             steps {
                 script {
-                    // def commitLog = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
-                    // def jiraMatcher = (BRANCH_NAME =~ /(?i)([A-Z]{2,10}-\d+)/) ?: (commitLog =~ /(?i)([A-Z]{2,10}-\d+)/)
+                    def commitLog = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
+                    def jiraMatcher = (BRANCH_NAME =~ /(?i)([A-Z]{2,10}-\d+)/) ?: (commitLog =~ /(?i)([A-Z]{2,10}-\d+)/)
 
-                    // if (!jiraMatcher) {
-                    //     error("CONFIGURATION GATE FAILURE: No JIRA issue key found in branch [${BRANCH_NAME}] or commit. CGP audit traceability requires an active work item.")
-                    // }
+                    if (!jiraMatcher) {
+                        error("CONFIGURATION AUDIT GATE FAILURE: No Jira issue key found in branch [${BRANCH_NAME}] or commit message. Defence compliance requires an active work item.")
+                    }
 
-                    // env.JIRA_KEY = jiraMatcher[0][1].toUpperCase()
-                    env.JIRA_KEY = "CGP-0000" // FIXME: Placeholder for demonstration purposes
+                    env.JIRA_KEY = jiraMatcher[0][1].toUpperCase()
                     currentBuild.displayName = "#${BUILD_NUMBER} [${env.JIRA_KEY}]"
                     currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Branch: ${BRANCH_NAME}"
 
                     echo "=========================================================="
-                    echo "Audit Traceability: JIRA Task: ${env.JIRA_KEY}"
-                    echo "Job:                ${JOB_NAME} | Build ID: ${BUILD_NUMBER}"
+                    echo "Traceability Audit Gate: PASSED"
+                    echo "Jira Work Item:     ${env.JIRA_KEY}"
                     echo "Commit SHA:         ${GIT_COMMIT_SHORT}"
-                    echo "Workspace:          ${WORKSPACE}"
-                    echo "=========================================================="
+                    echo "Target Node:        sil-agent-01 (RPi 400)"
+                    echo "=========================================================="                    
                 }
             }
         }
@@ -336,9 +335,29 @@ pipeline {
         }
         success {
             echo "SUCCESS: Verification passed, vetted multi-arch container published to Nexus, and deployed to SIL node for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT})."
-        }
+            withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_TOKEN')]) {
+                sh """
+                    curl -s -f -X POST \
+                      -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                      -H "Accept: application/json" \
+                      -H "Content-Type: application/json" \
+                      -d '{"body": "Deployment SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
+                      "https://cp4learning.atlassian.net/rest/api/2/issue/${env.JIRA_KEY}/comment" || true
+                """
+            }
+        } // Success
         failure {
             echo "FAILURE: Pipeline execution halted. Inspect stage telemetry."
+            withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_TOKEN')]) {
+                sh """
+                    curl -s -f -X POST \
+                      -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                      -H "Accept: application/json" \
+                      -H "Content-Type: application/json" \
+                      -d '{"body": "Deployment FAILURE: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" failed to deploy to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
+                      "https://cp4learning.atlassian.net/rest/api/2/issue/${env.JIRA_KEY}/comment" || true
+                """
+            }
         }
     }
 }
