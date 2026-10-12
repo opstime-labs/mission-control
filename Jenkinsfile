@@ -338,7 +338,7 @@ pipeline {
             steps {
                 withCredentials([
                     sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE'),
-                    usernamePassword(credentialsId: 'nexus-credentials-id', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')
+                    usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')
                 ]) {
                     sh '''
                         set -euo pipefail
