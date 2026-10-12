@@ -349,7 +349,7 @@ pipeline {
                         HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
 
                         # 2. Inspect live deployment slot over SSH directly using the key file
-                        CURRENT_ACTIVE=$(ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=accept-new pi@10.0.0.163 "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
+                        CURRENT_ACTIVE=$(ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=accept-new deployer@10.0.0.163 "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
                         echo "--> Current live slot on SIL node: [${CURRENT_ACTIVE}]"
 
                         # 3. Copy key into a temporary file inside the workspace so Docker can access it
@@ -364,7 +364,7 @@ pipeline {
                         alpine/ansible:latest \
                         ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
                             --private-key /workspace/id_rsa_deploy \
-                            -u pi \
+                            -u deployer \
                             -e "image_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
                             -e "slot=${CURRENT_ACTIVE}" \
                             -e "nexus_user=${NEXUS_USER}" \
