@@ -345,7 +345,7 @@ pipeline {
                       -H "Accept: application/json" \
                       -H "Content-Type: application/json" \
                       -d '{"body": "Deployment SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
-                      "\${env.JIRA_COMMENT_API}" || true
+                      "${env.JIRA_COMMENT_API}" || true
                 """
             }
         } // Success
