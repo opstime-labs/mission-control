@@ -10,8 +10,8 @@ pipeline {
     parameters {
         booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: true, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
         booleanParam(name: 'PUBLISH_DOCKER_IMAGE', defaultValue: true, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
-        booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
-        booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
+        booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: true, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
+        booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: true, description: 'Check to enable publishing raw binary release artifacts to Nexus')
         booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: true, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
         string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira Cloud REST API endpoint for issue comments')
     }
