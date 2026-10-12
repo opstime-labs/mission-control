@@ -332,7 +332,7 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { params.DEPLOY_TO_SIL == true }
-                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
             steps {
