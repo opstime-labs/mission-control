@@ -349,6 +349,8 @@ pipeline {
 
                         # 2. Extract SSH Agent socket path for container pass-through
                         SSH_AUTH_DIR=$(dirname "${SSH_AUTH_SOCK}")
+                        chmod 777 "${SSH_AUTH_DIR}"
+                        chmod 777 "${SSH_AUTH_SOCK}"
 
                         # 3. Resolve Jenkins host workspace path for volume mounting
                         JENKINS_HOME_HOST=$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
