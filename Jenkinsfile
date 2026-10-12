@@ -200,7 +200,7 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { params.PUBLISH_DOCKER_IMAGE == true }
-                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
             steps {
@@ -302,7 +302,7 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { params.DEPLOY_TO_SIL == true }
-                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
             // Runs on standard Linux build worker (no agent needed on target hardware)
