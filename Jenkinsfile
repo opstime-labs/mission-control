@@ -37,6 +37,7 @@ pipeline {
         
         // Canonical multibranch branch name; fallback to git rev-parse if running outside multibranch
         CURRENT_BRANCH                    = "${env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD 2>/dev/null', returnStdout: true).trim()}"
+        DEPLOY_HOST_SSH                   = "pi@10.0.0.163"
     }
 
     stages {
@@ -274,27 +275,54 @@ pipeline {
             }
         }
 
-        stage('Stage 6: Deploy to SIL Target Node') {
+        // stage('Stage 6: Deploy to SIL Target Node (Running as Jenkins Agent)') {
+        //     when {
+        //         beforeAgent true
+        //         allOf {
+        //             expression { params.DEPLOY_TO_SIL == true }
+        //             expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+        //         }
+        //     }
+        //     agent {
+        //         label env.DEPLOY_SIL_AGENT_NAME
+        //     }
+        //     steps {
+        //         sh '''
+        //             set -euo pipefail
+        //             mkdir -p /opt/mission-control
+        //             cp deploy/scripts/deploy.sh /opt/mission-control/deploy.sh
+        //             chmod 750 /opt/mission-control/deploy.sh
+        //             /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
+        //         '''
+        //     }
+        // }
+
+        stage('Stage 6: Deploy to SIL Target Node (SSH Standalone)') {
             when {
                 beforeAgent true
                 allOf {
                     expression { params.DEPLOY_TO_SIL == true }
-                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
-            agent {
-                label env.DEPLOY_SIL_AGENT_NAME
+            // Runs on standard Linux build worker (no agent needed on target hardware)
+            agent { 
+                label env.BUILD_AGENT_NAME 
             }
             steps {
-                sh '''
-                    set -euo pipefail
-                    mkdir -p /opt/mission-control
-                    cp deploy/scripts/deploy.sh /opt/mission-control/deploy.sh
-                    chmod 750 /opt/mission-control/deploy.sh
-                    /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
-                '''
+                sshagent(credentials: ['sil-node-ssh-key']) {
+                    sh '''
+                        set -euo pipefail                        
+                        echo "--> Synchronizing deployment scripts to standalone SIL hardware..."
+                        ssh -o StrictHostKeyChecking=accept-new ${env.DEPLOY_HOST_SSH} "mkdir -p /opt/mission-control"
+                        scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${env.DEPLOY_HOST_SSH}:/opt/mission-control/deploy.sh
+                        echo "--> Triggering blue-green cutover for baseline ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}..."
+                        ssh ${env.DEPLOY_HOST_SSH} "chmod 750 /opt/mission-control/deploy.sh && /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+                    '''
+                }
             }
         }
+
     }
 
     post {
