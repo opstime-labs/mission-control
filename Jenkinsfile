@@ -363,7 +363,7 @@ pipeline {
                         -e SSH_AUTH_SOCK="${SSH_AUTH_SOCK}" \
                         -w /workspace \
                         cytopia/ansible:latest \
-                        ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
+                        ansible-playbook -c paramiko -i ansible/inventory.ini ansible/deploy.yml \
                             -e "image_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
                             -e "slot=${CURRENT_ACTIVE}" \
                             -e "nexus_user=${NEXUS_USER}" \
