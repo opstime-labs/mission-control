@@ -31,7 +31,6 @@ pipeline {
         BUILDX_BUILDER                    = 'defence-builder'
         LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
         GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()        
-        JIRA_COMMENT_API                  = "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
 
         // BUILD_SCAN_TEST_ENABLE            = 'true'        
         // PUBLISH_RAW_RELEASE_ARTIFACTS     = 'false'
@@ -345,7 +344,7 @@ pipeline {
                       -H "Accept: application/json" \
                       -H "Content-Type: application/json" \
                       -d '{"body": "Deployment SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
-                      "${env.JIRA_COMMENT_API}" || true
+                      "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
                 """
             }
         } // Success
@@ -358,7 +357,7 @@ pipeline {
                       -H "Accept: application/json" \
                       -H "Content-Type: application/json" \
                       -d '{"body": "Deployment FAILURE: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" failed to deploy to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
-                      "\${env.JIRA_COMMENT_API}" || true
+                      "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
                 """
             }
         }
