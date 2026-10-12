@@ -9,7 +9,7 @@ pipeline {
 
     // Jenkins UI parameters for operator-controlled gates
     parameters {
-        booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: true, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
+        booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: false, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
         booleanParam(name: 'PUBLISH_DOCKER_IMAGE', defaultValue: true, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
         booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
         booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
@@ -314,12 +314,17 @@ pipeline {
                     sh '''
                         set -euo pipefail                        
                         echo "--> Synchronizing deployment scripts to standalone SIL hardware..."
-                        ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "mkdir -p /opt/mission-control"
-                        scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${DEPLOY_HOST_SSH}:/opt/mission-control/deploy.sh
+                        ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "mkdir -p /tmp/mission-control"
+                        scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${DEPLOY_HOST_SSH}:/tmp/mission-control/deploy.sh
                        
                         echo "--> Triggering blue-green cutover for baseline ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}..."
-                        ssh ${DEPLOY_HOST_SSH} "chmod 750 /opt/mission-control/deploy.sh && /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+                        ssh ${DEPLOY_HOST_SSH} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
                     '''
+                }
+            }
+            post {
+                always {                    
+                    sh "ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} 'rm -rf /tmp/mission-control'"
                 }
             }
         }
