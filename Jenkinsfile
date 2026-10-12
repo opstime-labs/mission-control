@@ -43,16 +43,21 @@ pipeline {
         stage('Stage 1: Configuration Audit & Traceability Gate') {
             steps {
                 script {
-                    def commitLog = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
-                    def jiraMatcher = (env.CURRENT_BRANCH =~ /(?i)([A-Z]{2,10}-\d+)/) ?: (commitLog =~ /(?i)([A-Z]{2,10}-\d+)/)
+                    // Check PR source branch, PR title, or fallback to the last 5 commit logs
+                    def prSourceBranch = env.CHANGE_BRANCH ?: ""
+                    def prTitle        = env.CHANGE_TITLE ?: ""
+                    def commitLogs     = sh(script: "git log -5 --pretty=%B", returnStdout: true).trim()
+
+                    def searchString = "${env.CURRENT_BRANCH} ${prSourceBranch} ${prTitle}\n${commitLogs}"
+                    def jiraMatcher  = searchString =~ /(?i)([A-Z]{2,10}-\d+)/
 
                     if (!jiraMatcher) {
-                        error("CONFIGURATION AUDIT GATE FAILURE: No Jira issue key found in branch [${env.CURRENT_BRANCH}] or commit message. Defence compliance requires an active work item.")
+                        error("CONFIGURATION AUDIT GATE FAILURE: No Jira issue key found in PR source [${prSourceBranch}], title [${prTitle}], branch [${env.CURRENT_BRANCH}], or recent commits. Defence compliance requires an active work item.")
                     }
 
                     env.JIRA_KEY = jiraMatcher[0][1].toUpperCase()
                     currentBuild.displayName = "#${BUILD_NUMBER} [${env.JIRA_KEY}]"
-                    currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Branch: ${env.CURRENT_BRANCH}"
+                    currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Ref: ${env.CURRENT_BRANCH}"
 
                     echo "=========================================================="
                     echo "Traceability Audit Gate: PASSED"
@@ -64,7 +69,7 @@ pipeline {
                 }
             }
         }
-
+        
         stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {
             when {
                 beforeAgent true
