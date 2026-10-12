@@ -14,7 +14,7 @@ pipeline {
         booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
         booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: true, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
 
-        string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira API endpoint for issue comments')
+        stringParam(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira API endpoint for issue comments')
     }
 
     environment {
@@ -30,9 +30,8 @@ pipeline {
         NEXUS_RAW_BASE                    = 'http://10.0.0.182:8081/repository/raw-hosted'
         BUILDX_BUILDER                    = 'defence-builder'
         LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
-        GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-        JIRA_HOST_URL                     = 'https://cp4learning.atlassian.net'
-        JIRA_COMMENT_API                  = '${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment'
+        GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()        
+        JIRA_COMMENT_API                  = "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
 
         // BUILD_SCAN_TEST_ENABLE            = 'true'        
         // PUBLISH_RAW_RELEASE_ARTIFACTS     = 'false'
@@ -346,7 +345,7 @@ pipeline {
                       -H "Accept: application/json" \
                       -H "Content-Type: application/json" \
                       -d '{"body": "Deployment SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
-                      "${env.JIRA_COMMENT_API}" || true
+                      "\${env.JIRA_COMMENT_API}" || true
                 """
             }
         } // Success
@@ -359,7 +358,7 @@ pipeline {
                       -H "Accept: application/json" \
                       -H "Content-Type: application/json" \
                       -d '{"body": "Deployment FAILURE: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" failed to deploy to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
-                      "${env.JIRA_COMMENT_API}" || true
+                      "\${env.JIRA_COMMENT_API}" || true
                 """
             }
         }
