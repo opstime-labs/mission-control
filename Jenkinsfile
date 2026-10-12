@@ -6,17 +6,17 @@ pipeline {
         disableConcurrentBuilds()
         timeout(time: 25, unit: 'MINUTES')
     }
+    // Jenkins UI parameters for user input to control pipeline behavior
     parameters {
-        // Creates a checkbox in the Jenkins UI
-        booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: false, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
+        booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: true, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
         booleanParam(name: 'PUBLISH_DOCKER_IMAGE', defaultValue: true, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
         booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
         booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
         booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: true, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
-
-        string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira API endpoint for issue comments')
+        string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira Cloud REST API endpoint for issue comments')
     }
 
+    // Environment variables for consistent build behavior and configuration
     environment {
         DOTNET_CLI_TELEMETRY_OPTOUT       = '1'
         DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
@@ -30,51 +30,47 @@ pipeline {
         NEXUS_RAW_BASE                    = 'http://10.0.0.182:8081/repository/raw-hosted'
         BUILDX_BUILDER                    = 'defence-builder'
         LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
-        GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()        
-
-        // BUILD_SCAN_TEST_ENABLE            = 'true'        
-        // PUBLISH_RAW_RELEASE_ARTIFACTS     = 'false'
-        // PUBLISH_DOCKER_IMAGE              = 'true'        
-        // RUN_IMAGE_VULN_SCAN               = 'false'
-        // DEPLOY_TO_SIL                     = 'true'
-        DEPLOY_SIL_AGENT_NAME             = 'sil-agent-01'       
+        GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+        DEPLOY_SIL_AGENT_NAME             = 'sil-agent-01'
         BUILD_AGENT_NAME                  = 'builtin'
-        BRANCH_NAME                       = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()        
+        
+        EFFECTIVE_BRANCH                  = sh(
+            script: "git rev-parse --abbrev-ref HEAD 2>/dev/null | sed 's|^heads/||' | sed 's|^remotes/origin/||' | sed 's|^origin/||'", 
+            returnStdout: true
+        ).trim()
     }
 
+    //
     stages {
         stage('Stage 1: Configuration Audit & Traceability Gate') {
             steps {
                 script {
                     def commitLog = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
-                    def jiraMatcher = (BRANCH_NAME =~ /(?i)([A-Z]{2,10}-\d+)/) ?: (commitLog =~ /(?i)([A-Z]{2,10}-\d+)/)
+                    def jiraMatcher = (env.EFFECTIVE_BRANCH =~ /(?i)([A-Z]{2,10}-\d+)/) ?: (commitLog =~ /(?i)([A-Z]{2,10}-\d+)/)
 
                     if (!jiraMatcher) {
-                        error("CONFIGURATION AUDIT GATE FAILURE: No Jira issue key found in branch [${BRANCH_NAME}] or commit message. Defence compliance requires an active work item.")
+                        error("CONFIGURATION AUDIT GATE FAILURE: No Jira issue key found in branch [${env.EFFECTIVE_BRANCH}] or commit message. Defence compliance requires an active work item.")
                     }
 
                     env.JIRA_KEY = jiraMatcher[0][1].toUpperCase()
                     currentBuild.displayName = "#${BUILD_NUMBER} [${env.JIRA_KEY}]"
-                    currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Branch: ${BRANCH_NAME}"
+                    currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Branch: ${env.EFFECTIVE_BRANCH}"
 
                     echo "=========================================================="
                     echo "Traceability Audit Gate: PASSED"
                     echo "Jira Work Item:     ${env.JIRA_KEY}"
                     echo "Commit SHA:         ${GIT_COMMIT_SHORT}"
-                    echo "Target Node:        sil-agent-01 (RPi 400)"
-                    echo "=========================================================="                    
+                    echo "Effective Branch:   ${env.EFFECTIVE_BRANCH}"
+                    echo "Target SIL Node:    ${env.DEPLOY_SIL_AGENT_NAME} (RPi 400)"
+                    echo "=========================================================="
                 }
             }
         }
 
-        stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {                        
+        stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {
             when {
                 beforeAgent true
-                allOf {
-                    //expression { env.BUILD_SCAN_TEST_ENABLE == 'true' }
-                    expression { params.BUILD_SCAN_TEST_ENABLE == true }
-                    branch 'main'
-                }
+                expression { params.BUILD_SCAN_TEST_ENABLE == true }
             }
             steps {
                 script {
@@ -82,7 +78,7 @@ pipeline {
                         script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
                         returnStdout: true
                     ).trim()
-                    def hostWorkspace = WORKSPACE.replace('/var/jenkins_home', jenkinsHomeHost)                    
+                    def hostWorkspace = WORKSPACE.replace('/var/jenkins_home', jenkinsHomeHost)
 
                     withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                         sh """
@@ -161,16 +157,11 @@ pipeline {
         stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
             when {
                 beforeAgent true
-                allOf {
-                    //expression { env.RUN_IMAGE_VULN_SCAN == 'true' }
-                    expression { params.RUN_IMAGE_VULN_SCAN == true }
-                    branch 'main'
-                }
+                expression { params.RUN_IMAGE_VULN_SCAN == true }
             }
             steps {
                 sh """
                     set -euo pipefail
-
                     echo "--> Step 1: Building local amd64 container for security quarantine gate..."
                     docker buildx build \
                       --load \
@@ -195,32 +186,30 @@ pipeline {
             }
             post {
                 always {
-                    // Untag scan artifact post-scan to keep Mini PC disk clean
                     sh "docker rmi ${LOCAL_SCAN_TAG} || true"
                 }
             }
         }
-        
 
         stage('Stage 4: Multi-Arch Compilation & Publish Docker Image to Nexus') {
             when {
                 beforeAgent true
                 allOf {
-                    //expression { env.PUBLISH_DOCKER_IMAGE == 'true' }
                     expression { params.PUBLISH_DOCKER_IMAGE == true }
-                    branch 'main'
+                    expression { 
+                        return (env.EFFECTIVE_BRANCH in ['main', 'master', 'HEAD']) || 
+                               (sh(script: "git merge-base --is-ancestor HEAD origin/main && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
+                    }
                 }
             }
-
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
                         set -euo pipefail
-
                         echo "--> Authenticating Docker daemon to Nexus..."
                         echo "\$NEXUS_PASS" | docker login -u "\$NEXUS_USER" --password-stdin "${REGISTRY_HOST}"
 
-                        echo "--> Ensuring active builder instance..."
+                        echo "--> Ensuring active multi-arch builder..."
                         docker buildx use defence-builder
 
                         echo "--> Building & publishing multi-arch release images (amd64 + arm64) to Nexus..."
@@ -234,30 +223,27 @@ pipeline {
                           .
 
                         docker logout "${REGISTRY_HOST}"
-
-                        echo "--> Pruning Buildx builder cache..."
                         docker builder prune -f --filter "until=24h"
                     """
                 }
             }
         }
 
-        stage('Stage 5: Publish Raw Binary Release to Nexus') {            
+        stage('Stage 5: Publish Raw Binary Release to Nexus') {
             when {
                 beforeAgent true
                 allOf {
-                    //expression { env.PUBLISH_RAW_RELEASE_ARTIFACTS == 'true' }
                     expression { params.PUBLISH_RAW_RELEASE_ARTIFACTS == true }
-                    branch 'main'
+                    expression { 
+                        return (env.EFFECTIVE_BRANCH in ['main', 'master', 'HEAD']) || 
+                               (sh(script: "git merge-base --is-ancestor HEAD origin/main && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
+                    }
                 }
             }
-            
             steps {
                 withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
                         set -euo pipefail
-
-                        echo "--> Packaging raw binary release tarball..."
                         RELEASE_DIR="release_dist"
                         mkdir -p "\${RELEASE_DIR}"
 
@@ -270,7 +256,7 @@ pipeline {
 
                         UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/${BUILD_NUMBER}"
 
-                        echo "--> Uploading binary package to Nexus Raw: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
+                        echo "--> Uploading binary package: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
                         curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
                           --upload-file "\${ARTIFACT_NAME}" \
                           "\${UPLOAD_URL}/\${ARTIFACT_NAME}"
@@ -279,8 +265,6 @@ pipeline {
                         curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
                           --upload-file "\${CHECKSUM_NAME}" \
                           "\${UPLOAD_URL}/\${CHECKSUM_NAME}"
-
-                        echo "--> Nexus raw binary release published and cryptographically verified."
                     """
                 }
             }
@@ -288,11 +272,7 @@ pipeline {
                 always {
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'release_dist/*.tar.gz, release_dist/*.sha256'
                     fingerprint 'release_dist/*.tar.gz'
-                    
-                    // Janitor cleanup using docker container to avoid host permission blocks
-                    sh """
-                        docker run --rm -v "${WORKSPACE}:/ws" alpine sh -c "rm -rf /ws/release_dist /ws/publish_raw"
-                    """
+                    sh "docker run --rm -v '${WORKSPACE}:/ws' alpine sh -c 'rm -rf /ws/release_dist /ws/publish_raw' || true"
                 }
             }
         }
@@ -301,29 +281,22 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    //expression { env.DEPLOY_TO_SIL == 'true' }
                     expression { params.DEPLOY_TO_SIL == true }
-                    branch 'main'
+                    expression { 
+                        return (env.EFFECTIVE_BRANCH in ['main', 'master', 'HEAD']) || 
+                               (sh(script: "git merge-base --is-ancestor HEAD origin/main && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
+                    }
                 }
             }
-
-            agent { 
-                //label 'sil-agent-01'
+            agent {
                 label env.DEPLOY_SIL_AGENT_NAME
-            } // Runs directly on RPi 400
-
+            }
             steps {
                 sh '''
                     set -euo pipefail
-                    
-                    # Ensure the deployment directory exists on the target
                     mkdir -p /opt/mission-control
-                    
-                    # Deploy the version-controlled script directly from workspace
                     cp deploy/scripts/deploy.sh /opt/mission-control/deploy.sh
                     chmod 750 /opt/mission-control/deploy.sh
-                    
-                    # Execute the deployment with the deterministic image tag
                     /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
                 '''
             }
@@ -332,51 +305,56 @@ pipeline {
 
     post {
         always {
-            // Keep target node SSD clean
             sh 'docker image prune -f || true'
             cleanWs deleteDirs: true, notFailBuild: true
         }
         success {
             script {
-                echo "SUCCESS: Pipeline verified for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on branch [${BRANCH_NAME}]."
+                echo "SUCCESS: Pipeline verified for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on effective branch [${env.EFFECTIVE_BRANCH}]."
                 
-                // STRICT AUDIT GATE: Only post SIL hardware deployment status for baseline merges
-                if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ /^release\/.*/) {
+                def isBaselineMerge = (env.EFFECTIVE_BRANCH in ['main', 'master']) || 
+                                      (sh(script: "git merge-base --is-ancestor HEAD origin/main 2>/dev/null && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
+
+                if (isBaselineMerge) {
                     withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
-                                                    usernameVariable: 'JIRA_USER', 
-                                                    passwordVariable: 'JIRA_TOKEN')]) {
+                                                      usernameVariable: 'JIRA_USER', 
+                                                      passwordVariable: 'JIRA_TOKEN')]) {
                         sh """
                             curl -s -f -X POST \
-                            -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
-                            -H "Accept: application/json" \
-                            -H "Content-Type: application/json" \
-                            -d '{"body": "BASELINE DEPLOYMENT SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}. Baseline verified against branch \\"${BRANCH_NAME}\\"."}' \
-                            "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
+                              -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                              -H "Accept: application/json" \
+                              -H "Content-Type: application/json" \
+                              -d '{"body": "BASELINE DEPLOYMENT SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}. Baseline verified on branch main."}' \
+                              "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
                         """
                     }
                 } else {
-                    echo "Notice: Branch [${BRANCH_NAME}] is a pre-merge feature/bugfix branch. Skipping SIL deployment Jira telemetry to maintain clean audit baselines."
+                    echo "Notice: Branch [${env.EFFECTIVE_BRANCH}] is an isolated branch. Skipping SIL deployment Jira telemetry to maintain clean audit baselines."
                 }
             }
         }
         failure {
             script {
-                echo "FAILURE: Pipeline execution halted on branch [${BRANCH_NAME}]."
-                
-                // On main or release, failures are critical audit events
-                if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ /^release\/.*/) {
+                echo "FAILURE: Pipeline execution halted on branch [${env.EFFECTIVE_BRANCH}]."
+
+                def isBaselineMerge = (env.EFFECTIVE_BRANCH in ['main', 'master']) || 
+                                      (sh(script: "git merge-base --is-ancestor HEAD origin/main 2>/dev/null && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
+
+                if (isBaselineMerge) {
                     withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
-                                                    usernameVariable: 'JIRA_USER', 
-                                                    passwordVariable: 'JIRA_TOKEN')]) {
+                                                      usernameVariable: 'JIRA_USER', 
+                                                      passwordVariable: 'JIRA_TOKEN')]) {
                         sh """
                             curl -s -f -X POST \
-                            -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
-                            -H "Accept: application/json" \
-                            -H "Content-Type: application/json" \
-                            -d '{"body": "DEPLOYMENT HALTED: Build #${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on baseline branch \\"${BRANCH_NAME}\\" failed verification or SIL cutover. Check Jenkins console log."}' \
-                            "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
+                              -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                              -H "Accept: application/json" \
+                              -H "Content-Type: application/json" \
+                              -d '{"body": "BASELINE DEPLOYMENT HALTED: Build #${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on branch \\"${env.EFFECTIVE_BRANCH}\\" failed execution. Inspect Jenkins console log."}' \
+                              "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
                         """
                     }
+                } else {
+                    echo "Notice: Failure occurred on isolated branch [${env.EFFECTIVE_BRANCH}]. Skipping Jira baseline failure comment."
                 }
             }
         }
