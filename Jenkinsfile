@@ -13,6 +13,8 @@ pipeline {
         booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
         booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
         booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: true, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
+
+        string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira API endpoint for issue comments')
     }
 
     environment {
@@ -28,7 +30,7 @@ pipeline {
         NEXUS_RAW_BASE                    = 'http://10.0.0.182:8081/repository/raw-hosted'
         BUILDX_BUILDER                    = 'defence-builder'
         LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
-        GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+        GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()        
 
         // BUILD_SCAN_TEST_ENABLE            = 'true'        
         // PUBLISH_RAW_RELEASE_ARTIFACTS     = 'false'
@@ -37,7 +39,7 @@ pipeline {
         // DEPLOY_TO_SIL                     = 'true'
         DEPLOY_SIL_AGENT_NAME             = 'sil-agent-01'       
         BUILD_AGENT_NAME                  = 'builtin'
-        //BRANCH_NAME                       = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()        
+        BRANCH_NAME                       = sh(script: "git rev-parse --abbrev-ref HEAD", returnStdout: true).trim()        
     }
 
     stages {
@@ -330,33 +332,52 @@ pipeline {
 
     post {
         always {
+            // Keep target node SSD clean
             sh 'docker image prune -f || true'
             cleanWs deleteDirs: true, notFailBuild: true
         }
         success {
-            echo "SUCCESS: Verification passed, vetted multi-arch container published to Nexus, and deployed to SIL node for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT})."
-            withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_TOKEN')]) {
-                sh """
-                    curl -s -f -X POST \
-                      -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
-                      -H "Accept: application/json" \
-                      -H "Content-Type: application/json" \
-                      -d '{"body": "Deployment SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
-                      "https://cp4learning.atlassian.net/rest/api/2/issue/${env.JIRA_KEY}/comment" || true
-                """
+            script {
+                echo "SUCCESS: Pipeline verified for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on branch [${BRANCH_NAME}]."
+                
+                // STRICT AUDIT GATE: Only post SIL hardware deployment status for baseline merges
+                if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ /^release\/.*/) {
+                    withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
+                                                    usernameVariable: 'JIRA_USER', 
+                                                    passwordVariable: 'JIRA_TOKEN')]) {
+                        sh """
+                            curl -s -f -X POST \
+                            -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                            -H "Accept: application/json" \
+                            -H "Content-Type: application/json" \
+                            -d '{"body": "BASELINE DEPLOYMENT SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}. Baseline verified against branch \\"${BRANCH_NAME}\\"."}' \
+                            "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
+                        """
+                    }
+                } else {
+                    echo "Notice: Branch [${BRANCH_NAME}] is a pre-merge feature/bugfix branch. Skipping SIL deployment Jira telemetry to maintain clean audit baselines."
+                }
             }
-        } // Success
+        }
         failure {
-            echo "FAILURE: Pipeline execution halted. Inspect stage telemetry."
-            withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_TOKEN')]) {
-                sh """
-                    curl -s -f -X POST \
-                      -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
-                      -H "Accept: application/json" \
-                      -H "Content-Type: application/json" \
-                      -d '{"body": "Deployment FAILURE: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" failed to deploy to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
-                      "https://cp4learning.atlassian.net/rest/api/2/issue/${env.JIRA_KEY}/comment" || true
-                """
+            script {
+                echo "FAILURE: Pipeline execution halted on branch [${BRANCH_NAME}]."
+                
+                // On main or release, failures are critical audit events
+                if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ /^release\/.*/) {
+                    withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
+                                                    usernameVariable: 'JIRA_USER', 
+                                                    passwordVariable: 'JIRA_TOKEN')]) {
+                        sh """
+                            curl -s -f -X POST \
+                            -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                            -H "Accept: application/json" \
+                            -H "Content-Type: application/json" \
+                            -d '{"body": "DEPLOYMENT HALTED: Build #${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on baseline branch \\"${BRANCH_NAME}\\" failed verification or SIL cutover. Check Jenkins console log."}' \
+                            "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
+                        """
+                    }
+                }
             }
         }
     }
