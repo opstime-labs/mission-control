@@ -336,7 +336,7 @@ pipeline {
                 }
             }
             steps {
-                sshagent(credentials: ['pi']) {
+                sshagent(credentials: ['sil-node-ssh-key']) {
                     withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', 
                                                     usernameVariable: 'NEXUS_USER', 
                                                     passwordVariable: 'NEXUS_PASS')]) {
