@@ -315,7 +315,7 @@ pipeline {
                               -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
                               -H "Accept: application/json" \
                               -H "Content-Type: application/json" \
-                              -d '{"body": "BASELINE DEPLOYMENT SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}. Baseline verified on branch [${env.CURRENT_BRANCH}]."}' \
+                              -d '{"body": "BASELINE DEPLOYMENT SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build [#${BUILD_NUMBER}|${env.BUILD_URL}]. Baseline verified on branch [${env.CURRENT_BRANCH}].\\n\\nAudit Telemetry: ${env.BUILD_URL}"}' \
                               "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
                         """
                     }
@@ -337,7 +337,7 @@ pipeline {
                               -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
                               -H "Accept: application/json" \
                               -H "Content-Type: application/json" \
-                              -d '{"body": "BASELINE DEPLOYMENT HALTED: Build #${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on branch \\"${env.CURRENT_BRANCH}\\" failed execution. Inspect Jenkins console log."}' \
+                              -d '{"body": "BASELINE DEPLOYMENT HALTED: Build [#${BUILD_NUMBER}|${env.BUILD_URL}] (${GIT_COMMIT_SHORT}) on branch \\"${env.CURRENT_BRANCH}\\" failed execution.\\n\\nInspect Console Log: ${env.BUILD_URL}console"}' \
                               "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
                         """
                     }
