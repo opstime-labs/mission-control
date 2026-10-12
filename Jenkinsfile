@@ -352,7 +352,7 @@ pipeline {
 
                             # 3. Resolve Jenkins host workspace path for volume mounting
                             JENKINS_HOME_HOST=$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
-                            HOST_WORKSPACE="${WORKSPACE/\/var\/jenkins_home/${JENKINS_HOME_HOST}}"
+                            HOST_WORKSPACE="${WORKSPACE}/var/jenkins_home/${JENKINS_HOME_HOST}"
 
                             # 4. Execute Ansible Playbook via ephemeral container
                             docker run --rm \
