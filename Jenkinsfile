@@ -200,7 +200,7 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { params.PUBLISH_DOCKER_IMAGE == true }
-                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
             steps {
@@ -297,34 +297,65 @@ pipeline {
         //     }
         // }
 
-        stage('Stage 6: Deploy to SIL Target Node (SSH Standalone)') {
+        // stage('Stage 6: Deploy to SIL Target Node (SSH Standalone)') {
+        //     when {
+        //         beforeAgent true
+        //         allOf {
+        //             expression { params.DEPLOY_TO_SIL == true }
+        //             expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+        //         }
+        //     }
+        //     // Runs on standard Linux build worker (no agent needed on target hardware)
+        //     agent { 
+        //         label env.BUILD_NODE_LABEL 
+        //     }
+        //     steps {
+        //         sshagent(credentials: ['sil-node-ssh-key']) {
+        //             sh '''
+        //                 set -euo pipefail                        
+        //                 echo "--> Synchronizing deployment scripts to standalone SIL hardware..."
+        //                 ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "mkdir -p /tmp/mission-control"
+        //                 scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${DEPLOY_HOST_SSH}:/tmp/mission-control/deploy.sh
+                       
+        //                 echo "--> Triggering blue-green cutover for baseline ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}..."
+        //                 ssh ${DEPLOY_HOST_SSH} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+
+        //                 echo "--> Cleaning up temporary deployment artifacts on SIL node..."
+        //                 ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "rm -rf /tmp/mission-control"
+        //             '''
+        //         }
+        //     }            
+        // }
+
+        stage('Stage 6: Deploy to SIL Node via Ansible') {
             when {
                 beforeAgent true
                 allOf {
                     expression { params.DEPLOY_TO_SIL == true }
-                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
-            }
-            // Runs on standard Linux build worker (no agent needed on target hardware)
-            agent { 
-                label env.BUILD_NODE_LABEL 
             }
             steps {
                 sshagent(credentials: ['sil-node-ssh-key']) {
-                    sh '''
-                        set -euo pipefail                        
-                        echo "--> Synchronizing deployment scripts to standalone SIL hardware..."
-                        ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "mkdir -p /tmp/mission-control"
-                        scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${DEPLOY_HOST_SSH}:/tmp/mission-control/deploy.sh
-                       
-                        echo "--> Triggering blue-green cutover for baseline ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}..."
-                        ssh ${DEPLOY_HOST_SSH} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+                    withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', 
+                                                      usernameVariable: 'NEXUS_USER', 
+                                                      passwordVariable: 'NEXUS_PASS')]) {
+                        sh """
+                            set -euo pipefail
+                            
+                            # Determine active slot on target node over SSH
+                            CURRENT_ACTIVE=\$(ssh -o StrictHostKeyChecking=accept-new \${DEPLOY_HOST_SSH} "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
+                            echo "--> Current live slot: [\${CURRENT_ACTIVE}]"
 
-                        echo "--> Cleaning up temporary deployment artifacts on SIL node..."
-                        ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "rm -rf /tmp/mission-control"
-                    '''
+                            ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
+                              -e "image_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
+                              -e "slot=\${CURRENT_ACTIVE}" \
+                              -e "nexus_user=\${NEXUS_USER}" \
+                              -e "nexus_pass=\${NEXUS_PASS}"
+                        """
+                    }
                 }
-            }            
+            }
         }
 
     }

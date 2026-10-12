@@ -1,0 +1,72 @@
+---
+- name: Verify deployment baseline parameters
+  ansible.builtin.assert:
+    that:
+      - target_tag is defined
+      - target_tag | length > 0
+    fail_msg: "Target tag missing. Configuration audit requires a deterministic tag."
+
+- name: Authenticate Docker daemon to Sonatype Nexus
+  community.docker.docker_login:
+    registry_url: "{{ registry_host }}"
+    username: "{{ nexus_user }}"
+    password: "{{ nexus_pass }}"
+    reauthorize: yes
+  no_log: true
+
+- name: Pull multi-arch image digest from Nexus
+  community.docker.docker_image:
+    name: "{{ registry_host }}/{{ image_name }}:{{ target_tag }}"
+    source: pull
+    force_source: yes
+
+- name: Start target container on idle slot ({{ idle_slot }}:{{ idle_port }})
+  community.docker.docker_container:
+    name: "mc-{{ idle_slot }}"
+    image: "{{ registry_host }}/{{ image_name }}:{{ target_tag }}"
+    state: started
+    restart_policy: always
+    published_ports:
+      - "127.0.0.1:{{ idle_port }}:8080"
+    env:
+      ASPNETCORE_ENVIRONMENT: "Production"
+      DEPLOYMENT_SLOT: "{{ idle_slot }}"
+      BASELINE_TAG: "{{ target_tag }}"
+    memory: "512m"
+
+- name: Execute automated health check on idle slot
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ idle_port }}/health"
+    status_code: 200
+  register: health_result
+  retries: 10
+  delay: 2
+  until: health_result.status == 200
+
+- name: Stage updated NGINX configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: '0644'
+  become: yes
+
+- name: Validate NGINX syntax and execute graceful reload
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - /usr/sbin/nginx -t
+    - /usr/sbin/nginx -s reload
+  become: yes
+
+- name: Evict previous slot container (mc-{{ slot }})
+  community.docker.docker_container:
+    name: "mc-{{ slot }}"
+    state: absent
+  ignore_errors: yes
+
+- name: Record deployed state to disk
+  ansible.builtin.copy:
+    content: "{{ idle_slot }}"
+    dest: "{{ app_dir }}/active_slot"
+    mode: '0644'
