@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Defence Compliance Git Hook: JIRA Audit Traceability Enforcement
+# Validates format: DRS-<number>: <imperative description>
+# Example: DRS-101: Configure locked NuGet feed restore
+# ==============================================================================
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(head -n 1 "$COMMIT_MSG_FILE")
+# Allow merge commits and rebase squashes to pass without modification
+if grep -qE '^Merge branch' "$COMMIT_MSG_FILE" || grep -qE '^# This is a combination of' "$COMMIT_MSG_FILE"; then
+    exit 0
+fi
+# Regex enforcing: Project Key (DRS-XXX), followed by colon/space, and commit description
+JIRA_REGEX="^(DRS-[0-9]+):[[:space:]]+([A-Za-z0-9].{8,})$"
+if ! [[ "$COMMIT_MSG" =~ $JIRA_REGEX ]]; then
+    echo ""
+    echo "========================================================================"
+    echo " [ERROR] GIT COMMIT REJECTED: JIRA AUDIT TRACEABILITY VIOLATION"
+    echo "========================================================================"
+    echo " Commit message failed format requirements:"
+    echo "   Actual:   \"$COMMIT_MSG\""
+    echo "   Expected: DRS-<number>: <Detailed description of change>"
+    echo ""
+    echo " Valid Examples:"
+    echo "   DRS-101: Add Directory.Build.props to lock C# SDK properties"
+    echo "   DRS-42: Implement blue-green NGINX upstream graceful cutover"
+    echo "========================================================================"
+    echo ""
+    exit 1
+fi
+exit 0
