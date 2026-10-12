@@ -313,17 +313,17 @@ pipeline {
 
                     // Multi-line Jira markup audit block
                     def jiraCommentBody = """*CONFIGURATION AUDIT: BASELINE DEPLOYED TO SIL*
-                    h4. Build & Delivery Telemetry
-                    * *Jenkins Build Run:* [#${BUILD_NUMBER}\vert{}${env.BUILD_URL}]
-                    * *Baseline Branch / Commit:* \`${env.CURRENT_BRANCH}\` / \`${GIT_COMMIT_SHORT}\`
-                    * *Target SIL Node:* \`${env.DEPLOY_SIL_AGENT_NAME}\` (Raspberry Pi 400 - Slot Active)
+h4. Build & Delivery Telemetry
+* *Jenkins Build Run:* [#${BUILD_NUMBER}\vert{}${env.BUILD_URL}]
+* *Baseline Branch / Commit:* \`${env.CURRENT_BRANCH}\` / \`${GIT_COMMIT_SHORT}\`
+* *Target SIL Node:* \`${env.DEPLOY_SIL_AGENT_NAME}\` (Raspberry Pi 400 - Slot Active)
 
-                    h4. Vetted Release Artifacts (Sonatype Nexus OSS)
-                    * *Container Registry:* [${dockerImageRef}\vert{}http://${dockerImageRef}]
-                    * *Raw Binary Archive:* [mission-control-api-${BUILD_NUMBER}-${GIT_COMMIT_SHORT}.tar.gz\vert{}${rawTarballUrl}]
-                    * *Integrity Digest:* [SHA-256 Verification Hash|${rawShaUrl}]
+h4. Vetted Release Artifacts (Sonatype Nexus OSS)
+* *Container Registry:* [${dockerImageRef}\vert{}http://${dockerImageRef}]
+* *Raw Binary Archive:* [mission-control-api-${BUILD_NUMBER}-${GIT_COMMIT_SHORT}.tar.gz\vert{}${rawTarballUrl}]
+* *Integrity Digest:* [SHA-256 Verification Hash|${rawShaUrl}]
 
-                    _Audit baseline recorded for Controlled Goods and V&V compliance._"""
+_Audit baseline recorded for Controlled Goods and V&V compliance._"""
 
                     withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
                                                       usernameVariable: 'JIRA_USER', 
