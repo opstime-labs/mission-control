@@ -314,10 +314,11 @@ pipeline {
                     sh '''
                         set -euo pipefail                        
                         echo "--> Synchronizing deployment scripts to standalone SIL hardware..."
-                        ssh -o StrictHostKeyChecking=accept-new ${env.DEPLOY_HOST_SSH} "mkdir -p /opt/mission-control"
-                        scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${env.DEPLOY_HOST_SSH}:/opt/mission-control/deploy.sh
+                        ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "mkdir -p /opt/mission-control"
+                        scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${DEPLOY_HOST_SSH}:/opt/mission-control/deploy.sh
+                       
                         echo "--> Triggering blue-green cutover for baseline ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}..."
-                        ssh ${env.DEPLOY_HOST_SSH} "chmod 750 /opt/mission-control/deploy.sh && /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+                        ssh ${DEPLOY_HOST_SSH} "chmod 750 /opt/mission-control/deploy.sh && /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
                     '''
                 }
             }
