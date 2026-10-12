@@ -6,7 +6,8 @@ pipeline {
         disableConcurrentBuilds()
         timeout(time: 25, unit: 'MINUTES')
     }
-    // Jenkins UI parameters for user input to control pipeline behavior
+
+    // Jenkins UI parameters for operator-controlled gates
     parameters {
         booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: true, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
         booleanParam(name: 'PUBLISH_DOCKER_IMAGE', defaultValue: true, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
@@ -16,7 +17,7 @@ pipeline {
         string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira Cloud REST API endpoint for issue comments')
     }
 
-    // Environment variables for consistent build behavior and configuration
+    // Environment variables for deterministic execution and defence audit trail
     environment {
         DOTNET_CLI_TELEMETRY_OPTOUT       = '1'
         DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
@@ -34,39 +35,41 @@ pipeline {
         DEPLOY_SIL_AGENT_NAME             = 'sil-agent-01'
         BUILD_AGENT_NAME                  = 'builtin'
         
-        EFFECTIVE_BRANCH                  = sh(
-            script: "git rev-parse --abbrev-ref HEAD 2>/dev/null | sed 's|^heads/||' | sed 's|^remotes/origin/||' | sed 's|^origin/||'", 
-            returnStdout: true
-        ).trim()
+        // Canonical multibranch branch name; fallback to git rev-parse if running outside multibranch
+        CURRENT_BRANCH                    = "${env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD 2>/dev/null', returnStdout: true).trim()}"
     }
 
-    //
     stages {
         stage('Stage 1: Configuration Audit & Traceability Gate') {
             steps {
                 script {
-                    def commitLog = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
-                    def jiraMatcher = (env.EFFECTIVE_BRANCH =~ /(?i)([A-Z]{2,10}-\d+)/) ?: (commitLog =~ /(?i)([A-Z]{2,10}-\d+)/)
+                    // Check PR source branch, PR title, or fallback to the last 5 commit logs
+                    def prSourceBranch = env.CHANGE_BRANCH ?: ""
+                    def prTitle        = env.CHANGE_TITLE ?: ""
+                    def commitLogs     = sh(script: "git log -5 --pretty=%B", returnStdout: true).trim()
+
+                    def searchString = "${env.CURRENT_BRANCH} ${prSourceBranch} ${prTitle}\n${commitLogs}"
+                    def jiraMatcher  = searchString =~ /(?i)([A-Z]{2,10}-\d+)/
 
                     if (!jiraMatcher) {
-                        error("CONFIGURATION AUDIT GATE FAILURE: No Jira issue key found in branch [${env.EFFECTIVE_BRANCH}] or commit message. Defence compliance requires an active work item.")
+                        error("CONFIGURATION AUDIT GATE FAILURE: No Jira issue key found in PR source [${prSourceBranch}], title [${prTitle}], branch [${env.CURRENT_BRANCH}], or recent commits. Defence compliance requires an active work item.")
                     }
 
                     env.JIRA_KEY = jiraMatcher[0][1].toUpperCase()
                     currentBuild.displayName = "#${BUILD_NUMBER} [${env.JIRA_KEY}]"
-                    currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Branch: ${env.EFFECTIVE_BRANCH}"
+                    currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Ref: ${env.CURRENT_BRANCH}"
 
                     echo "=========================================================="
                     echo "Traceability Audit Gate: PASSED"
                     echo "Jira Work Item:     ${env.JIRA_KEY}"
                     echo "Commit SHA:         ${GIT_COMMIT_SHORT}"
-                    echo "Effective Branch:   ${env.EFFECTIVE_BRANCH}"
+                    echo "Canonical Branch:   ${env.CURRENT_BRANCH}"
                     echo "Target SIL Node:    ${env.DEPLOY_SIL_AGENT_NAME} (RPi 400)"
                     echo "=========================================================="
                 }
             }
         }
-
+        
         stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {
             when {
                 beforeAgent true
@@ -196,10 +199,7 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { params.PUBLISH_DOCKER_IMAGE == true }
-                    expression { 
-                        return (env.EFFECTIVE_BRANCH in ['main', 'master', 'HEAD']) || 
-                               (sh(script: "git merge-base --is-ancestor HEAD origin/main && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
-                    }
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
             steps {
@@ -234,10 +234,7 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { params.PUBLISH_RAW_RELEASE_ARTIFACTS == true }
-                    expression { 
-                        return (env.EFFECTIVE_BRANCH in ['main', 'master', 'HEAD']) || 
-                               (sh(script: "git merge-base --is-ancestor HEAD origin/main && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
-                    }
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
             steps {
@@ -282,10 +279,7 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { params.DEPLOY_TO_SIL == true }
-                    expression { 
-                        return (env.EFFECTIVE_BRANCH in ['main', 'master', 'HEAD']) || 
-                               (sh(script: "git merge-base --is-ancestor HEAD origin/main && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
-                    }
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
             agent {
@@ -310,12 +304,9 @@ pipeline {
         }
         success {
             script {
-                echo "SUCCESS: Pipeline verified for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on effective branch [${env.EFFECTIVE_BRANCH}]."
+                echo "SUCCESS: Pipeline verified for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on branch [${env.CURRENT_BRANCH}]."
                 
-                def isBaselineMerge = (env.EFFECTIVE_BRANCH in ['main', 'master']) || 
-                                      (sh(script: "git merge-base --is-ancestor HEAD origin/main 2>/dev/null && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
-
-                if (isBaselineMerge) {
+                if (env.CURRENT_BRANCH in ['main', 'master']) {
                     withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
                                                       usernameVariable: 'JIRA_USER', 
                                                       passwordVariable: 'JIRA_TOKEN')]) {
@@ -324,23 +315,20 @@ pipeline {
                               -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
                               -H "Accept: application/json" \
                               -H "Content-Type: application/json" \
-                              -d '{"body": "BASELINE DEPLOYMENT SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}. Baseline verified on branch main."}' \
+                              -d '{"body": "BASELINE DEPLOYMENT SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}. Baseline verified on branch [${env.CURRENT_BRANCH}]."}' \
                               "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
                         """
                     }
                 } else {
-                    echo "Notice: Branch [${env.EFFECTIVE_BRANCH}] is an isolated branch. Skipping SIL deployment Jira telemetry to maintain clean audit baselines."
+                    echo "Notice: Branch [${env.CURRENT_BRANCH}] is an isolated branch. Skipping SIL deployment Jira telemetry to maintain clean audit baselines."
                 }
             }
         }
         failure {
             script {
-                echo "FAILURE: Pipeline execution halted on branch [${env.EFFECTIVE_BRANCH}]."
+                echo "FAILURE: Pipeline execution halted on branch [${env.CURRENT_BRANCH}]."
 
-                def isBaselineMerge = (env.EFFECTIVE_BRANCH in ['main', 'master']) || 
-                                      (sh(script: "git merge-base --is-ancestor HEAD origin/main 2>/dev/null && echo 'yes' || echo 'no'", returnStdout: true).trim() == 'yes')
-
-                if (isBaselineMerge) {
+                if (env.CURRENT_BRANCH in ['main', 'master']) {
                     withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
                                                       usernameVariable: 'JIRA_USER', 
                                                       passwordVariable: 'JIRA_TOKEN')]) {
@@ -349,12 +337,12 @@ pipeline {
                               -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
                               -H "Accept: application/json" \
                               -H "Content-Type: application/json" \
-                              -d '{"body": "BASELINE DEPLOYMENT HALTED: Build #${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on branch \\"${env.EFFECTIVE_BRANCH}\\" failed execution. Inspect Jenkins console log."}' \
+                              -d '{"body": "BASELINE DEPLOYMENT HALTED: Build #${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on branch \\"${env.CURRENT_BRANCH}\\" failed execution. Inspect Jenkins console log."}' \
                               "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
                         """
                     }
                 } else {
-                    echo "Notice: Failure occurred on isolated branch [${env.EFFECTIVE_BRANCH}]. Skipping Jira baseline failure comment."
+                    echo "Notice: Failure occurred on feature branch [${env.CURRENT_BRANCH}]. Skipping Jira baseline failure comment."
                 }
             }
         }
