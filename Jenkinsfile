@@ -337,7 +337,7 @@ pipeline {
             }
             steps {
                 withCredentials([
-                    sshUserPrivateKey(credentialsId: 'pi', keyFileVariable: 'SSH_KEY_FILE'),
+                    sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE'),
                     usernamePassword(credentialsId: 'nexus-credentials-id', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')
                 ]) {
                     sh '''
