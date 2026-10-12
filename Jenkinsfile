@@ -356,14 +356,15 @@ pipeline {
                         HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
                         echo "--> Resolved Host Workspace: [${HOST_WORKSPACE}]"
 
-                        # 4. Execute Ansible Playbook via ephemeral container
+                        # 4. Execute Ansible Playbook via container with native OpenSSH support
                         docker run --rm \
                         -v "${HOST_WORKSPACE}:/workspace" \
                         -v "${SSH_AUTH_DIR}:${SSH_AUTH_DIR}" \
                         -e SSH_AUTH_SOCK="${SSH_AUTH_SOCK}" \
+                        -e ANSIBLE_HOST_KEY_CHECKING=False \
                         -w /workspace \
-                        cytopia/ansible:latest \
-                        ansible-playbook -c paramiko -i ansible/inventory.ini ansible/deploy.yml \
+                        alpine/ansible:latest \
+                        ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
                             -e "image_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
                             -e "slot=${CURRENT_ACTIVE}" \
                             -e "nexus_user=${NEXUS_USER}" \
