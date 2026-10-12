@@ -319,14 +319,12 @@ pipeline {
                        
                         echo "--> Triggering blue-green cutover for baseline ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}..."
                         ssh ${DEPLOY_HOST_SSH} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+
+                        echo "--> Cleaning up temporary deployment artifacts on SIL node..."
+                        ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "rm -rf /tmp/mission-control"
                     '''
                 }
-            }
-            post {
-                always {                    
-                    sh "ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} 'rm -rf /tmp/mission-control'"
-                }
-            }
+            }            
         }
 
     }
