@@ -33,7 +33,7 @@ pipeline {
         LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:local-scan"
         GIT_COMMIT_SHORT                  = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
         DEPLOY_SIL_AGENT_NAME             = 'sil-agent-01'
-        BUILD_AGENT_NAME                  = 'builtin'
+        BUILD_AGENT_NAME                  = 'Built-In Node'
         
         // Canonical multibranch branch name; fallback to git rev-parse if running outside multibranch
         CURRENT_BRANCH                    = "${env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD 2>/dev/null', returnStdout: true).trim()}"
