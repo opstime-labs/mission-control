@@ -332,33 +332,52 @@ pipeline {
 
     post {
         always {
+            // Keep target node SSD clean
             sh 'docker image prune -f || true'
             cleanWs deleteDirs: true, notFailBuild: true
         }
         success {
-            echo "SUCCESS: Verification passed, vetted multi-arch container published to Nexus, and deployed to SIL node for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT})."
-            withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_TOKEN')]) {
-                sh """
-                    curl -s -f -X POST \
-                      -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
-                      -H "Accept: application/json" \
-                      -H "Content-Type: application/json" \
-                      -d '{"body": "Deployment SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
-                      "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
-                """
+            script {
+                echo "SUCCESS: Pipeline verified for baseline ${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on branch [${BRANCH_NAME}]."
+                
+                // STRICT AUDIT GATE: Only post SIL hardware deployment status for baseline merges
+                if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ /^release\/.*/) {
+                    withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
+                                                    usernameVariable: 'JIRA_USER', 
+                                                    passwordVariable: 'JIRA_TOKEN')]) {
+                        sh """
+                            curl -s -f -X POST \
+                            -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                            -H "Accept: application/json" \
+                            -H "Content-Type: application/json" \
+                            -d '{"body": "BASELINE DEPLOYMENT SUCCESS: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" successfully deployed to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}. Baseline verified against branch \\"${BRANCH_NAME}\\"."}' \
+                            "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
+                        """
+                    }
+                } else {
+                    echo "Notice: Branch [${BRANCH_NAME}] is a pre-merge feature/bugfix branch. Skipping SIL deployment Jira telemetry to maintain clean audit baselines."
+                }
             }
-        } // Success
+        }
         failure {
-            echo "FAILURE: Pipeline execution halted. Inspect stage telemetry."
-            withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_TOKEN')]) {
-                sh """
-                    curl -s -f -X POST \
-                      -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
-                      -H "Accept: application/json" \
-                      -H "Content-Type: application/json" \
-                      -d '{"body": "Deployment FAILURE: Image tag \\"${BUILD_NUMBER}-${GIT_COMMIT_SHORT}\\" failed to deploy to SIL node (RPi 400) via Jenkins build #${BUILD_NUMBER}."}' \
-                      "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
-                """
+            script {
+                echo "FAILURE: Pipeline execution halted on branch [${BRANCH_NAME}]."
+                
+                // On main or release, failures are critical audit events
+                if (env.BRANCH_NAME == 'main' || env.BRANCH_NAME =~ /^release\/.*/) {
+                    withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
+                                                    usernameVariable: 'JIRA_USER', 
+                                                    passwordVariable: 'JIRA_TOKEN')]) {
+                        sh """
+                            curl -s -f -X POST \
+                            -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                            -H "Accept: application/json" \
+                            -H "Content-Type: application/json" \
+                            -d '{"body": "DEPLOYMENT HALTED: Build #${BUILD_NUMBER} (${GIT_COMMIT_SHORT}) on baseline branch \\"${BRANCH_NAME}\\" failed verification or SIL cutover. Check Jenkins console log."}' \
+                            "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
+                        """
+                    }
+                }
             }
         }
     }
