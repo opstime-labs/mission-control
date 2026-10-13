@@ -1,26 +1,32 @@
-events { worker_connections 1024; }
+# Mission Control Sensor Gateway - Dynamic Blue/Green Upstream
+upstream mission_control_backend {
+    server 127.0.0.1:{{ idle_port }};
+    keepalive 32;
+}
 
-http {
-    upstream gateway_backend {
-        server 127.0.0.1:{{ idle_port }};
+server {
+    listen 80;
+    server_name _;
+
+    client_max_body_size 16M;
+
+    location / {
+        proxy_pass http://mission_control_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 5s;
     }
 
-    server {
-        listen 80;
-        server_name _;
-
-        location / {
-            proxy_pass http://gateway_backend;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_connect_timeout 2s;
-            proxy_read_timeout 5s;
-        }
-
-        location /health {
-            proxy_pass http://gateway_backend/health;
-            access_log off;
-        }
+    location /health {
+        proxy_pass http://mission_control_backend/health;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        access_log off;
     }
 }

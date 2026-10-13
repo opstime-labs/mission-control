@@ -5,7 +5,7 @@
   vars:
     app_dir: "/opt/mission-control"
     target_tag: "{{ image_tag }}"
-    active_port: "{{ 5001 if slot == 'blue' else 5002 }}"
+    active_port:    5001 if slot == 'blue' else 5002 }}"
     idle_port: "{{ 5002 if slot == 'blue' else 5001 }}"
     idle_slot: "{{ 'green' if slot == 'blue' else 'blue' }}"
 
