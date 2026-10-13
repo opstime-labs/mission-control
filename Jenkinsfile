@@ -36,8 +36,11 @@ pipeline {
         BUILD_NODE_LABEL                  = 'built-in'
         
         // Canonical multibranch branch name; fallback to git rev-parse if running outside multibranch
-        CURRENT_BRANCH                    = "${env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD 2>/dev/null', returnStdout: true).trim()}"
-        DEPLOY_HOST_SSH                   = "pi@10.0.0.163"
+        CURRENT_BRANCH                    = "${env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD 2>/dev/null', returnStdout: true).trim()}"        
+        // Deployment host details
+        DEPLOY_HOST_IP                    = "10.0.0.163"
+        DEPLOY_HOST_USER                  = "deployer"
+        DEPLOY_HOST_SSH                   = "${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP}"
     }
 
     stages {
@@ -349,15 +352,13 @@ pipeline {
                         REL_WORKSPACE="${WORKSPACE#/var/jenkins_home}"
                         HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
                         
-                        SIL_IP="10.0.0.163"
-                        SIL_USER="deployer"
                         KEY_TMP="./id_rsa_deploy"
 
                         # POSIX-compliant cleanup trap (EXIT runs on normal exit or failure via set -e)
                         trap 'rm -f "${KEY_TMP}"' EXIT INT TERM                        
 
                         # 2. Inspect active deployment slot on target SIL node
-                        CURRENT_ACTIVE=$(ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=accept-new ${SIL_USER}@${SIL_IP} "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
+                        CURRENT_ACTIVE=$(ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
                         echo "--> Baseline active slot on SIL node: [${CURRENT_ACTIVE}]"
 
                         # 3. Stage ephemeral deployment credentials
@@ -372,7 +373,7 @@ pipeline {
                           alpine/ansible:latest \
                           ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
                             --private-key "/workspace/${KEY_TMP#./}" \
-                            -u ${SIL_USER} \
+                            -u ${DEPLOY_HOST_USER} \
                             -e "target_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
                             -e "slot=${CURRENT_ACTIVE}" \
                             -e "nexus_user=${NEXUS_USER}" \

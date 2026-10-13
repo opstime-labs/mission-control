@@ -9,7 +9,7 @@
       - target_tag | length > 0
     fail_msg: "Target tag missing. Auditable baselines require an explicit tag."
 
-- name: Initialize base application directory with deployer ownership
+- name: Create base application directory with deployer ownership
   ansible.builtin.file:
     path: /opt/mission-control
     state: directory
