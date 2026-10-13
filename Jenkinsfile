@@ -353,8 +353,8 @@ pipeline {
                         SIL_USER="deployer"
                         KEY_TMP="./id_rsa_deploy"
 
-                        # Ensure private key is removed under all circumstances (trap on exit/fail)
-                        trap 'rm -f "${KEY_TMP}"' EXIT ERR INT TERM
+                        # POSIX-compliant cleanup trap (EXIT runs on normal exit or failure via set -e)
+                        trap 'rm -f "${KEY_TMP}"' EXIT INT TERM                        
 
                         # 2. Inspect active deployment slot on target SIL node
                         CURRENT_ACTIVE=$(ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=accept-new ${SIL_USER}@${SIL_IP} "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
