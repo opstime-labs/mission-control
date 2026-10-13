@@ -1,0 +1,12 @@
+---
+registry_host: "nexus.homelab.local:8082"
+image_name: "mission-control/sensor-gateway"
+app_base_dir: "/opt/mission-control"
+ingress_port: 8085
+
+# Deployment Slot Definitions
+slots:
+  blue:
+    port: 5001
+  green:
+    port: 5002

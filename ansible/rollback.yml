@@ -1,0 +1,103 @@
+---
+- name: Mission-Critical SIL Ingress Rollback
+  hosts: sil_nodes
+  gather_facts: false
+
+  vars:
+    app_base_dir: "/opt/mission-control"
+    ingress_port: 8085
+    slots:
+      blue:
+        port: 5001
+      green:
+        port: 5002
+
+  tasks:
+    # --------------------------------------------------------------------------
+    # 1. TOPOLOGY & FALLBACK SLOT DISCOVERY
+    # --------------------------------------------------------------------------
+    - name: Query current active slot on SIL node
+      ansible.builtin.slurp:
+        src: "{{ app_base_dir }}/active_slot"
+      register: active_slot_raw
+
+    - name: Evaluate fallback target slot
+      ansible.builtin.set_fact:
+        current_failed_slot: "{{ active_slot_raw.content | b64decode | trim }}"
+        fallback_slot: "{{ 'green' if (active_slot_raw.content | b64decode | trim == 'blue') else 'blue' }}"
+
+    - name: Assign fallback slot port and target port for template
+      ansible.builtin.set_fact:
+        fallback_port: "{{ slots[fallback_slot].port }}"
+        target_port: "{{ slots[fallback_slot].port }}"
+
+    - name: Dynamically resolve Docker Bridge Gateway IP
+      community.docker.docker_network_info:
+        name: bridge
+      register: rollback_bridge_info
+
+    - name: Set dynamic gateway IP fact
+      ansible.builtin.set_fact:
+        docker_gw_ip: "{{ rollback_bridge_info.network.IPAM.Config[0].Gateway }}"
+
+    - name: Log fallback operational target
+      ansible.builtin.debug:
+        msg: "Failed slot: [{{ current_failed_slot }}]. Rolling back to healthy slot [{{ fallback_slot }}] on port [{{ fallback_port }}] via Bridge Gateway [{{ docker_gw_ip }}]."
+
+    # --------------------------------------------------------------------------
+    # 2. BRING HEALTHY STANDBY SLOT BACK ONLINE
+    # --------------------------------------------------------------------------
+    - name: Ensure fallback container is started
+      community.docker.docker_container:
+        name: "mc-{{ fallback_slot }}"
+        state: started
+      become: no
+
+    - name: Verify fallback container internal readiness probe
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ fallback_port }}/health"
+        status_code: 200
+        timeout: 3
+      register: fallback_health
+      retries: 10
+      delay: 2
+      until: fallback_health.status == 200
+
+    # --------------------------------------------------------------------------
+    # 3. ATOMIC REVERSE PROXY RE-TARGETING & RELOAD
+    # --------------------------------------------------------------------------
+    - name: Stage fallback NGINX upstream route
+      ansible.builtin.template:
+        src: roles/blue_green/templates/gateway.conf.j2
+        dest: "{{ app_base_dir }}/nginx/conf.d/gateway.conf"
+        owner: deployer
+        group: deployer
+        mode: '0644'
+      become: no
+
+    - name: Test fallback NGINX configuration syntax
+      ansible.builtin.command: docker exec mc-proxy nginx -t
+      become: no
+      changed_when: false
+
+    - name: Signal zero-downtime NGINX reload
+      ansible.builtin.command: docker exec mc-proxy nginx -s reload
+      become: no
+
+    # --------------------------------------------------------------------------
+    # 4. POST-ROLLBACK STATE RECORDING
+    # --------------------------------------------------------------------------
+    - name: Persist fallback slot as active slot
+      ansible.builtin.copy:
+        content: "{{ fallback_slot }}"
+        dest: "{{ app_base_dir }}/active_slot"
+        owner: deployer
+        group: deployer
+        mode: '0644'
+      become: no
+
+    - name: Terminate failed release candidate container
+      community.docker.docker_container:
+        name: "mc-{{ current_failed_slot }}"
+        state: stopped
+      become: no
