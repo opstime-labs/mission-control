@@ -401,6 +401,11 @@ pipeline {
                             withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
                                 sh """
                                     set -euo pipefail
+                                    # 1. Resolve host workspace path for volume mounting (DooD)
+                                    JENKINS_HOME_HOST=$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
+                                    REL_WORKSPACE="${WORKSPACE#/var/jenkins_home}"
+                                    HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
+                                    
                                     cp "${SSH_KEY_FILE}" ./id_rsa_deploy
                                     chmod 600 ./id_rsa_deploy
                                     trap 'rm -f ./id_rsa_deploy' EXIT
@@ -428,6 +433,12 @@ pipeline {
                             withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
                                 sh """
                                     set -euo pipefail
+
+                                    # 1. Resolve host workspace path for volume mounting (DooD)
+                                    JENKINS_HOME_HOST=$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
+                                    REL_WORKSPACE="${WORKSPACE#/var/jenkins_home}"
+                                    HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
+                                    
                                     cp "${SSH_KEY_FILE}" ./id_rsa_deploy
                                     chmod 600 ./id_rsa_deploy
                                     trap 'rm -f ./id_rsa_deploy' EXIT
