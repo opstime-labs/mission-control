@@ -99,7 +99,7 @@
     published_ports:
       - "{{ ingress_port }}:{{ ingress_port }}"
     volumes:
-      - "{{ app_base_dir }}/nginx/conf.d/gateway.conf:/etc/nginx/conf.d/default.conf:ro"
+      - "{{ app_base_dir }}/nginx/conf.d:/etc/nginx/conf.d:ro"
   become: no
 
 - name: Test NGINX configuration syntax inside container
