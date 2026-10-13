@@ -402,16 +402,16 @@ pipeline {
                                 sh """
                                     set -euo pipefail
                                     # 1. Resolve host workspace path for volume mounting (DooD)
-                                    JENKINS_HOME_HOST=$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
-                                    REL_WORKSPACE="${WORKSPACE#/var/jenkins_home}"
-                                    HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
+                                    JENKINS_HOME_HOST=\$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
+                                    REL_WORKSPACE="\${WORKSPACE#/var/jenkins_home}"
+                                    HOST_WORKSPACE="\${JENKINS_HOME_HOST}\${REL_WORKSPACE}"
                                     
                                     cp "${SSH_KEY_FILE}" ./id_rsa_deploy
                                     chmod 600 ./id_rsa_deploy
                                     trap 'rm -f ./id_rsa_deploy' EXIT
 
                                     docker run --rm \
-                                    -v ${HOST_WORKSPACE}:/workspace \
+                                    -v \${HOST_WORKSPACE}:/workspace \
                                     -e ANSIBLE_HOST_KEY_CHECKING=False \
                                     -w /workspace alpine/ansible:latest \
                                     ansible-playbook -i ansible/inventory.ini ansible/rollback.yml \
@@ -435,16 +435,16 @@ pipeline {
                                     set -euo pipefail
 
                                     # 1. Resolve host workspace path for volume mounting (DooD)
-                                    JENKINS_HOME_HOST=$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
-                                    REL_WORKSPACE="${WORKSPACE#/var/jenkins_home}"
-                                    HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
+                                    JENKINS_HOME_HOST=\$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
+                                    REL_WORKSPACE="\${WORKSPACE#/var/jenkins_home}"
+                                    HOST_WORKSPACE="\${JENKINS_HOME_HOST}\${REL_WORKSPACE}"
                                     
                                     cp "${SSH_KEY_FILE}" ./id_rsa_deploy
                                     chmod 600 ./id_rsa_deploy
                                     trap 'rm -f ./id_rsa_deploy' EXIT
 
                                     docker run --rm \
-                                    -v ${HOST_WORKSPACE}:/workspace \
+                                    -v \${HOST_WORKSPACE}:/workspace \
                                     -e ANSIBLE_HOST_KEY_CHECKING=False \
                                     -w /workspace alpine/ansible:latest \
                                     ansible-playbook -i ansible/inventory.ini ansible/fail_safe.yml \
@@ -456,7 +456,7 @@ pipeline {
                     }
                 }
             }
-        }// end of Stage 7
+        } // end of Stage 7
     }  // end of stages
 
     post {
