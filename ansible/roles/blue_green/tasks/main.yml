@@ -33,20 +33,10 @@
 # ==============================================================================
 # PHASE 2: APPLICATION RUNTIME INSTANTIATION (IDLE SLOT)
 # ==============================================================================
-- name: Authenticate Docker daemon to Sonatype Nexus
-  community.docker.docker_login:
-    registry_url: "{{ registry_host }}"
-    username: "{{ nexus_user }}"
-    password: "{{ nexus_pass }}"
-    reauthorize: yes
-  no_log: true
-  become: no
-
-- name: Pull multi-arch application container digest
-  community.docker.docker_image:
-    name: "{{ registry_host }}/{{ image_name }}:{{ target_tag }}"
-    source: pull
-    force_source: yes
+- name: Ensure stale candidate slot container is purged prior to launch
+  community.docker.docker_container:
+    name: "mc-{{ idle_slot }}"
+    state: absent
   become: no
 
 - name: Start mission workload on candidate idle slot ({{ idle_slot }}:{{ idle_port }})
@@ -54,6 +44,7 @@
     name: "mc-{{ idle_slot }}"
     image: "{{ registry_host }}/{{ image_name }}:{{ target_tag }}"
     state: started
+    recreate: yes
     restart_policy: always
     published_ports:
       - "127.0.0.1:{{ idle_port }}:8080"
