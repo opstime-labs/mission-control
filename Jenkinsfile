@@ -401,7 +401,7 @@ pipeline {
                         sh '''
                             set -euo pipefail
                             echo "--> Running end-to-end smoke test against ingress port 8085..."
-                            //curl --fail --retry 5 --retry-delay 2 --max-time 5 http://10.0.0.163:8085/health
+                            #curl --fail --retry 5 --retry-delay 2 --max-time 5 http://10.0.0.163:8085/health
                             curl --fail --retry 3 --retry-delay 2 --max-time 5 ${params.HEALTH_CHECK_URL}
                         '''
                     } catch (Exception e) {
