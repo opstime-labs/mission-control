@@ -332,6 +332,7 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { params.DEPLOY_TO_SIL == true }
+                    // Enforce deployment gate: only release/main baselines deploy to physical SIL hardware
                     //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
@@ -343,35 +344,39 @@ pipeline {
                     sh '''
                         set -euo pipefail
 
-                        # 1. Resolve host workspace path for volume mounting
+                        # 1. Resolve host workspace path for volume mounting (DooD)
                         JENKINS_HOME_HOST=$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
                         REL_WORKSPACE="${WORKSPACE#/var/jenkins_home}"
                         HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
+                        
+                        SIL_IP="10.0.0.163"
+                        SIL_USER="deployer"
+                        KEY_TMP="./id_rsa_deploy"
 
-                        # 2. Inspect live deployment slot over SSH directly using the key file
-                        CURRENT_ACTIVE=$(ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=accept-new deployer@10.0.0.163 "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
-                        echo "--> Current live slot on SIL node: [${CURRENT_ACTIVE}]"
+                        # Ensure private key is removed under all circumstances (trap on exit/fail)
+                        trap 'rm -f "${KEY_TMP}"' EXIT ERR INT TERM
 
-                        # 3. Copy key into a temporary file inside the workspace so Docker can access it
-                        cp "${SSH_KEY_FILE}" ./id_rsa_deploy
-                        chmod 600 ./id_rsa_deploy
+                        # 2. Inspect active deployment slot on target SIL node
+                        CURRENT_ACTIVE=$(ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=accept-new ${SIL_USER}@${SIL_IP} "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
+                        echo "--> Baseline active slot on SIL node: [${CURRENT_ACTIVE}]"
 
-                        # 4. Execute Ansible Playbook via container
+                        # 3. Stage ephemeral deployment credentials
+                        cp "${SSH_KEY_FILE}" "${KEY_TMP}"
+                        chmod 600 "${KEY_TMP}"
+
+                        # 4. Execute containerized Ansible deployment (Zero Host Pollution)
                         docker run --rm \
-                        -v "${HOST_WORKSPACE}:/workspace" \
-                        -e ANSIBLE_HOST_KEY_CHECKING=False \
-                        -w /workspace \
-                        alpine/ansible:latest \
-                        ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
-                            --private-key /workspace/id_rsa_deploy \
-                            -u deployer \
-                            -e "image_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
+                          -v "${HOST_WORKSPACE}:/workspace" \
+                          -e ANSIBLE_HOST_KEY_CHECKING=False \
+                          -w /workspace \
+                          alpine/ansible:latest \
+                          ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
+                            --private-key "/workspace/${KEY_TMP#./}" \
+                            -u ${SIL_USER} \
+                            -e "target_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
                             -e "slot=${CURRENT_ACTIVE}" \
                             -e "nexus_user=${NEXUS_USER}" \
                             -e "nexus_pass=${NEXUS_PASS}"
-
-                        # 5. Clean up private key from workspace
-                        rm -f ./id_rsa_deploy
                     '''
                 }
             }
