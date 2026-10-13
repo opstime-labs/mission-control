@@ -16,6 +16,7 @@ pipeline {
         booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: true, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
         booleanParam(name: 'ROLLBACK', defaultValue: true, description: 'Check to enable rolling back to a previous deployment')
         string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira Cloud REST API endpoint for issue comments')
+        string(name: 'HEALTH_CHECK_URL', defaultValue: 'http://10.0.0.163:8085/health', description: 'URL for health check endpoint')
     }
 
     // Environment variables for deterministic execution and defence audit trail
@@ -400,7 +401,8 @@ pipeline {
                         sh '''
                             set -euo pipefail
                             echo "--> Running end-to-end smoke test against ingress port 8085..."
-                            curl --fail --retry 5 --retry-delay 2 --max-time 5 http://10.0.0.163:8085/health
+                            //curl --fail --retry 5 --retry-delay 2 --max-time 5 http://10.0.0.163:8085/health
+                            curl --fail --retry 3 --retry-delay 2 --max-time 5 ${params.HEALTH_CHECK_URL}
                         '''
                     } catch (Exception e) {
                         echo "CRITICAL: Smoke test failed on target node! Initiating automated Ansible rollback..."
