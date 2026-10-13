@@ -7,14 +7,22 @@
     src: "{{ app_base_dir }}/active_slot"
   register: active_slot_raw
 
+- name: Normalize active slot state
+  ansible.builtin.set_fact:
+    raw_slot_state: "{{ active_slot_raw.content | b64decode | trim }}"
+
+- name: Determine recovery vs standard blue-green execution
+  ansible.builtin.set_fact:
+    is_quarantined: "{{ raw_slot_state not in ['blue', 'green'] }}"
+
 - name: Compute active and candidate target slots
   ansible.builtin.set_fact:
-    current_slot: "{{ active_slot_raw.content | b64decode | trim }}"
-    target_slot: "{{ 'green' if (active_slot_raw.content | b64decode | trim == 'blue') else 'blue' }}"
+    current_slot: "{{ 'none' if is_quarantined else raw_slot_state }}"
+    target_slot: "{{ 'blue' if is_quarantined else ('green' if raw_slot_state == 'blue' else 'blue') }}"
 
 - name: Set dynamic slot port mappings
   ansible.builtin.set_fact:
-    current_port: "{{ slots[current_slot].port }}"
+    current_port: "{{ slots[current_slot].port if not is_quarantined else 0 }}"
     target_port: "{{ slots[target_slot].port }}"
 
 - name: Inspect Docker bridge network to dynamically resolve Gateway IP
@@ -28,7 +36,11 @@
 
 - name: Display calculated deployment topology
   ansible.builtin.debug:
-    msg: "Active: mc-{{ current_slot }}:{{ current_port }} | Target: mc-{{ target_slot }}:{{ target_port }} | Bridge Gateway: {{ docker_gw_ip }}"
+    msg: >
+      Recovery Mode: {{ is_quarantined }} |
+      Active Slot: {{ current_slot }} (Port: {{ current_port }}) |
+      Target Deployment Slot: {{ target_slot }} (Port: {{ target_port }}) |
+      Bridge Gateway: {{ docker_gw_ip }}
 
 # ==============================================================================
 # PHASE 2: IMAGE STAGING & CANDIDATE SLOT STARTUP
@@ -127,10 +139,11 @@
   community.docker.docker_container_info:
     name: "mc-{{ current_slot }}"
   register: prev_container_info
+  when: not is_quarantined
 
 - name: Retain previous slot in stopped standby holding state (for instant rollback)
   community.docker.docker_container:
     name: "mc-{{ current_slot }}"
     state: stopped
-  when: prev_container_info.exists
+  when: not is_quarantined and prev_container_info.exists
   become: no
