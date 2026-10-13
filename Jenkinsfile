@@ -376,8 +376,7 @@ pipeline {
                           ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
                             --private-key "/workspace/${KEY_TMP#./}" \
                             -u ${DEPLOY_HOST_USER} \
-                            -e "target_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
-                            -e "slot=${CURRENT_ACTIVE}" \
+                            -e "target_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \                            
                             -e "nexus_user=${NEXUS_USER}" \
                             -e "nexus_pass=${NEXUS_PASS}"
                     '''
