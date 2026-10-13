@@ -396,17 +396,23 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Smoke test the production ingress on port 80
+                        // Smoke test the production ingress on port 8085
                         sh '''
                             set -euo pipefail
-                            echo "--> Running end-to-end smoke test against ingress port 80..."
-                            curl --fail --retry 5 --retry-delay 2 --max-time 5 http://10.0.0.163/health
+                            echo "--> Running end-to-end smoke test against ingress port 8085..."
+                            curl --fail --retry 5 --retry-delay 2 --max-time 5 http://10.0.0.163:8085/health
                         '''
                     } catch (Exception e) {
                         echo "CRITICAL: Smoke test failed on target node! Initiating automated Ansible rollback..."
                         withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
                             sh '''
                                 set -euo pipefail
+                        
+                                # 1. Resolve host workspace path for volume mounting (DooD)
+                                JENKINS_HOME_HOST=$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
+                                REL_WORKSPACE="${WORKSPACE#/var/jenkins_home}"
+                                HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
+                                
                                 cp "${SSH_KEY_FILE}" ./id_rsa_deploy
                                 chmod 600 ./id_rsa_deploy
                                 trap 'rm -f ./id_rsa_deploy' EXIT
