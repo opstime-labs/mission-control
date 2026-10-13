@@ -47,7 +47,7 @@
     state: started
     restart_policy: always
     published_ports:
-      - "{{ docker_gw_ip }}:{{ target_port }}:8080"
+      - "0.0.0.0:{{ target_port }}:8080"
     env:
       ASPNETCORE_ENVIRONMENT: "Production"
       DEPLOYMENT_SLOT: "{{ target_slot }}"
@@ -57,13 +57,17 @@
 
 - name: Poll target container internal health probe
   ansible.builtin.uri:
-    url: "http://{{ docker_gw_ip }}:{{ target_port }}/health"
+    url: "http://127.0.0.1:{{ target_port }}/health"
     status_code: 200
     timeout: 3
   register: candidate_health
   retries: 10
   delay: 2
   until: candidate_health.status == 200
+
+- name: Allow Kestrel runtime worker pool to stabilize before ingress cutover
+  ansible.builtin.pause:
+    seconds: 2
 
 # ==============================================================================
 # PHASE 3: ATOMIC INGRESS CUTOVER VIA NGINX
@@ -119,8 +123,14 @@
     mode: '0644'
   become: no
 
+- name: Inspect if previous slot container exists
+  community.docker.docker_container_info:
+    name: "mc-{{ current_slot }}"
+  register: prev_container_info
+
 - name: Retain previous slot in stopped standby holding state (for instant rollback)
   community.docker.docker_container:
     name: "mc-{{ current_slot }}"
     state: stopped
+  when: prev_container_info.exists
   become: no
