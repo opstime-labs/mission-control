@@ -43,6 +43,7 @@ pipeline {
         DEPLOY_HOST_IP                    = "10.0.0.163"
         DEPLOY_HOST_USER                  = "deployer"
         DEPLOY_HOST_SSH                   = "${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP}"
+        SMOKE_TEST_URL                    = "${params.HEALTH_CHECK_URL}"
     }
 
     stages {
@@ -402,7 +403,7 @@ pipeline {
                             set -euo pipefail
                             echo "--> Running end-to-end smoke test against ingress port 8085..."
                             #curl --fail --retry 5 --retry-delay 2 --max-time 5 http://10.0.0.163:8085/health
-                            curl --fail --retry 3 --retry-delay 2 --max-time 5 ${params.HEALTH_CHECK_URL}
+                            curl --fail --retry 3 --retry-delay 2 --max-time 5 "${SMOKE_TEST_URL}"
                         '''
                     } catch (Exception e) {
                         echo "CRITICAL: Smoke test failed on target node! Initiating automated Ansible rollback..."
