@@ -100,17 +100,35 @@
   ansible.builtin.command: docker exec mc-proxy nginx -s reload
   become: no
 
+# # ==============================================================================
+# # PHASE 4: STALE WORKLOAD EVICTION & STATE PERSISTENCE
+# # ==============================================================================
+# - name: Evict stale slot container (mc-{{ slot }})
+#   community.docker.docker_container:
+#     name: "mc-{{ slot }}"
+#     state: absent
+#   become: no
+#   ignore_errors: yes
+
+# - name: Persist active slot state to baseline file
+#   ansible.builtin.copy:
+#     content: "{{ idle_slot }}"
+#     dest: /opt/mission-control/active_slot
+#     owner: deployer
+#     group: deployer
+#     mode: '0644'
+#   become: no
+
 # ==============================================================================
-# PHASE 4: STALE WORKLOAD EVICTION & STATE PERSISTENCE
+# PHASE 4: STANDBY RETENTION & STATE UPDATE (DO NOT DELETE)
 # ==============================================================================
-- name: Evict stale slot container (mc-{{ slot }})
+- name: Retain previous slot in standby (Stop instead of destroy to free RAM)
   community.docker.docker_container:
     name: "mc-{{ slot }}"
-    state: absent
+    state: stopped
   become: no
-  ignore_errors: yes
 
-- name: Persist active slot state to baseline file
+- name: Persist active deployment slot to baseline file
   ansible.builtin.copy:
     content: "{{ idle_slot }}"
     dest: /opt/mission-control/active_slot

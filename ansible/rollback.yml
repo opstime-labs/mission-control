@@ -1,0 +1,90 @@
+---
+- name: Mission-Critical SIL Ingress Rollback
+  hosts: all
+  gather_facts: false
+  vars:
+    active_slot_file: "/opt/mission-control/active_slot"
+    conf_dir: "/opt/mission-control/nginx/conf.d"
+
+  tasks:
+    # --------------------------------------------------------------------------
+    # 1. READ CURRENT RUNTIME BASELINE
+    # --------------------------------------------------------------------------
+    - name: Query current active slot on SIL node
+      ansible.builtin.slurp:
+        src: "{{ active_slot_file }}"
+      register: current_slot_encoded
+
+    - name: Evaluate fallback target slot
+      ansible.builtin.set_fact:
+        current_active: "{{ current_slot_encoded.content | b64decode | trim }}"
+        fallback_slot: "{{ 'blue' if (current_slot_encoded.content | b64decode | trim == 'green') else 'green' }}"
+        fallback_port: "{{ '5001' if (current_slot_encoded.content | b64decode | trim == 'green') else '5002' }}"
+
+    - name: Log fallback operational target
+      ansible.builtin.debug:
+        msg: "Active slot is [{{ current_active }}]. Initiating emergency fallback to slot [{{ fallback_slot }}] on port [{{ fallback_port }}]."
+
+    # --------------------------------------------------------------------------
+    # 2. WAKE & VERIFY FALLBACK WORKLOAD
+    # --------------------------------------------------------------------------
+    - name: Ensure fallback container is started
+      community.docker.docker_container:
+        name: "mc-{{ fallback_slot }}"
+        state: started
+      become: no
+
+    - name: Verify fallback container internal readiness probe
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ fallback_port }}/health"
+        status_code: 200
+        timeout: 3
+      register: fallback_health
+      retries: 5
+      delay: 2
+      until: fallback_health.status == 200
+
+    # --------------------------------------------------------------------------
+    # 3. ATOMIC REVERSE PROXY RE-TARGETING
+    # --------------------------------------------------------------------------
+    - name: Stage fallback NGINX upstream route
+      ansible.builtin.template:
+        src: roles/blue_green/templates/gateway.conf.j2
+        dest: "{{ conf_dir }}/gateway.conf"
+        owner: deployer
+        group: deployer
+        mode: '0644'
+      vars:
+        idle_port: "{{ fallback_port }}"
+      become: no
+
+    - name: Validate NGINX configuration syntax inside container
+      ansible.builtin.command: docker exec mc-proxy nginx -t
+      become: no
+      changed_when: false
+
+    - name: Signal graceful zero-downtime NGINX upstream reload
+      ansible.builtin.command: docker exec mc-proxy nginx -s reload
+      become: no
+
+    # --------------------------------------------------------------------------
+    # 4. QUARANTINE FAULTY SLOT & UPDATE PERSISTED STATE
+    # --------------------------------------------------------------------------
+    - name: Quarantine faulty workload container (Stop without deleting for forensic audit)
+      community.docker.docker_container:
+        name: "mc-{{ current_active }}"
+        state: stopped
+      become: no
+
+    - name: Update persisted active slot baseline
+      ansible.builtin.copy:
+        content: "{{ fallback_slot }}"
+        dest: "{{ active_slot_file }}"
+        owner: deployer
+        group: deployer
+        mode: '0644'
+      become: no
+
+    - name: Confirm rollback completion
+      ansible.builtin.debug:
+        msg: "Rollback successfully completed. Ingress is now routing to [{{ fallback_slot }}] on port [{{ fallback_port }}]. Faulty slot [{{ current_active }}] is stopped for diagnostics."

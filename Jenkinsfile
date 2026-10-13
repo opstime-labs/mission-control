@@ -14,6 +14,7 @@ pipeline {
         booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
         booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
         booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: true, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
+        booleanParam(name: 'ROLLBACK', defaultValue: true, description: 'Check to enable rolling back to a previous deployment')
         string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira Cloud REST API endpoint for issue comments')
     }
 
@@ -381,8 +382,51 @@ pipeline {
                     '''
                 }
             }
-        }
-    }  
+        } // end of Stage 6
+
+        stage('Stage 7: Post-Deployment Smoke Test & Automated Rollback') {
+            when {
+                beforeAgent true
+                allOf {
+                    expression { params.ROLLBACK == true }
+                    // Enforce deployment gate: only release/main baselines deploy to physical SIL hardware
+                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                }
+            }
+            steps {
+                script {
+                    try {
+                        // Smoke test the production ingress on port 80
+                        sh '''
+                            set -euo pipefail
+                            echo "--> Running end-to-end smoke test against ingress port 80..."
+                            curl --fail --retry 5 --retry-delay 2 --max-time 5 http://10.0.0.163/health
+                        '''
+                    } catch (Exception e) {
+                        echo "CRITICAL: Smoke test failed on target node! Initiating automated Ansible rollback..."
+                        withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
+                            sh '''
+                                set -euo pipefail
+                                cp "${SSH_KEY_FILE}" ./id_rsa_deploy
+                                chmod 600 ./id_rsa_deploy
+                                trap 'rm -f ./id_rsa_deploy' EXIT
+
+                                docker run --rm \
+                                -v "${HOST_WORKSPACE}:/workspace" \
+                                -e ANSIBLE_HOST_KEY_CHECKING=False \
+                                -w /workspace \
+                                alpine/ansible:latest \
+                                ansible-playbook -i ansible/inventory.ini ansible/rollback.yml \
+                                    --private-key /workspace/id_rsa_deploy \
+                                    -u ${DEPLOY_HOST_USER}
+                            '''
+                        }
+                        error("Deployment aborted and rolled back due to smoke test failure: ${e.message}")
+                    }
+                }
+            } //
+        } // end of Stage 7
+    }  // end of stages
 
     post {
         always {
@@ -454,4 +498,4 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
             }
         }
     }
-}
+} // end of pipeline
