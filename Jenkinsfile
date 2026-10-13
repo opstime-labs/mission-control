@@ -384,53 +384,78 @@ pipeline {
             }
         } // end of Stage 6
 
-        stage('Stage 7: Post-Deployment Smoke Test & Automated Rollback') {
-            when {
-                beforeAgent true
-                allOf {
-                    expression { params.ROLLBACK == true }
-                    // Enforce deployment gate: only release/main baselines deploy to physical SIL hardware
-                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
-                }
-            }
+        stage('Stage 7: Smoke Test & Automated Recovery') {
             steps {
                 script {
                     try {
-                        // Smoke test the production ingress on port 8085
+                        // Primary Verification: Probe Ingress Port 8085
                         sh """
                             set -euo pipefail
-                            echo "--> Running end-to-end smoke test against ingress port 8085..."
-                            curl --fail --retry 3 --retry-delay 2 --max-time 5 "${params.HEALTH_CHECK_URL}"
+                            echo "--> Verifying Ingress readiness on port 8085..."
+                            curl --fail --retry 5 --retry-delay 2 --max-time 5 "${params.HEALTH_CHECK_URL}"
                         """
-                    } catch (Exception e) {
-                        echo "CRITICAL: Smoke test failed on target node! Initiating automated Ansible rollback..."
-                        withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
-                            sh '''
-                                set -euo pipefail
-                        
-                                # 1. Resolve host workspace path for volume mounting (DooD)
-                                JENKINS_HOME_HOST=$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
-                                REL_WORKSPACE="${WORKSPACE#/var/jenkins_home}"
-                                HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
-                                
-                                cp "${SSH_KEY_FILE}" ./id_rsa_deploy
-                                chmod 600 ./id_rsa_deploy
-                                trap 'rm -f ./id_rsa_deploy' EXIT
+                        echo "SUCCESS: Primary ingress probe verified."
+                    } catch (Exception primaryError) {
+                        echo "WARNING: Primary verification failed! Invoking Phase 1 automated rollback..."
+                        try {
+                            withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
+                                sh """
+                                    set -euo pipefail
+                                    # 1. Resolve host workspace path for volume mounting (DooD)
+                                    JENKINS_HOME_HOST=\$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
+                                    REL_WORKSPACE="\${WORKSPACE#/var/jenkins_home}"
+                                    HOST_WORKSPACE="\${JENKINS_HOME_HOST}\${REL_WORKSPACE}"
+                                    
+                                    cp "${SSH_KEY_FILE}" ./id_rsa_deploy
+                                    chmod 600 ./id_rsa_deploy
+                                    trap 'rm -f ./id_rsa_deploy' EXIT
 
-                                docker run --rm \
-                                -v "${HOST_WORKSPACE}:/workspace" \
-                                -e ANSIBLE_HOST_KEY_CHECKING=False \
-                                -w /workspace \
-                                alpine/ansible:latest \
-                                ansible-playbook -i ansible/inventory.ini ansible/rollback.yml \
-                                    --private-key /workspace/id_rsa_deploy \
-                                    -u ${DEPLOY_HOST_USER}
-                            '''
+                                    docker run --rm \
+                                    -v \${HOST_WORKSPACE}:/workspace \
+                                    -e ANSIBLE_HOST_KEY_CHECKING=False \
+                                    -w /workspace alpine/ansible:latest \
+                                    ansible-playbook -i ansible/inventory.ini ansible/rollback.yml \
+                                    --private-key /workspace/id_rsa_deploy -u ${DEPLOY_HOST_USER}
+                                """
+                            }
+
+                            // Verify fallback ingress
+                            sh """
+                                set -euo pipefail
+                                echo "--> Verifying fallback slot ingress..."
+                                curl --fail --retry 3 --retry-delay 2 --max-time 5 "${params.HEALTH_CHECK_URL}"
+                            """
+                            echo "RECOVERY: Rollback to previous slot succeeded. Pipeline marked UNSTABLE."
+                            currentBuild.result = 'UNSTABLE'
+
+                        } catch (Exception secondaryError) {
+                            echo "CRITICAL DOUBLE FAULT: Rollback failed! Invoking Phase 2 Fail-Safe Lockdown..."
+                            withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
+                                sh """
+                                    set -euo pipefail
+
+                                    # 1. Resolve host workspace path for volume mounting (DooD)
+                                    JENKINS_HOME_HOST=\$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
+                                    REL_WORKSPACE="\${WORKSPACE#/var/jenkins_home}"
+                                    HOST_WORKSPACE="\${JENKINS_HOME_HOST}\${REL_WORKSPACE}"
+                                    
+                                    cp "${SSH_KEY_FILE}" ./id_rsa_deploy
+                                    chmod 600 ./id_rsa_deploy
+                                    trap 'rm -f ./id_rsa_deploy' EXIT
+
+                                    docker run --rm \
+                                    -v \${HOST_WORKSPACE}:/workspace \
+                                    -e ANSIBLE_HOST_KEY_CHECKING=False \
+                                    -w /workspace alpine/ansible:latest \
+                                    ansible-playbook -i ansible/inventory.ini ansible/fail_safe.yml \
+                                    --private-key /workspace/id_rsa_deploy -u ${DEPLOY_HOST_USER}
+                                """
+                            }
+                            error("CRITICAL DOUBLE FAULT: SIL node locked in 503 Fail-Safe mode. Node quarantined for root-cause analysis.")
                         }
-                        error("Deployment aborted and rolled back due to smoke test failure: ${e.message}")
                     }
                 }
-            } //
+            }
         } // end of Stage 7
     }  // end of stages
 

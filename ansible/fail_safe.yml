@@ -1,0 +1,94 @@
+---
+- name: Critical Stop & Fail-Safe Node Lock
+  hosts: sil_nodes
+  gather_facts: true
+
+  vars:
+    app_base_dir: "/opt/mission-control"
+    triage_dir: "{{ app_base_dir }}/triage/double-fault-{{ ansible_date_time.epoch }}"
+    ingress_port: 8085
+
+  tasks:
+    # --------------------------------------------------------------------------
+    # 1. FORENSIC TELEMETRY CAPTURE (BEFORE SYSTEM STATE IS ALTERED)
+    # --------------------------------------------------------------------------
+    - name: Create incident forensic triage directory
+      ansible.builtin.file:
+        path: "{{ triage_dir }}"
+        state: directory
+        owner: deployer
+        group: deployer
+        mode: '0750'
+      become: no
+
+    - name: Dump stdout/stderr from both blue and green slots
+      ansible.builtin.shell: |
+        docker logs --tail 300 mc-blue > "{{ triage_dir }}/mc-blue.log" 2>&1 || true
+        docker logs --tail 300 mc-green > "{{ triage_dir }}/mc-green.log" 2>&1 || true
+        docker logs --tail 300 mc-proxy > "{{ triage_dir }}/mc-proxy.log" 2>&1 || true
+      become: no
+
+    - name: Capture kernel ring buffer and network sockets
+      ansible.builtin.shell: |
+        dmesg -T | tail -n 200 > "{{ triage_dir }}/dmesg.log"
+        ss -tulpn > "{{ triage_dir }}/listening_sockets.log"
+        free -m > "{{ triage_dir }}/memory.log"
+      become: yes
+
+    # --------------------------------------------------------------------------
+    # 2. ENGAGE DETERMINISTIC 503 MAINTENANCE INGRESS
+    # --------------------------------------------------------------------------
+    - name: Deploy fail-safe maintenance NGINX configuration
+      ansible.builtin.copy:
+        dest: "{{ app_base_dir }}/nginx/conf.d/gateway.conf"
+        content: |
+          server {
+              listen {{ ingress_port }} default_server;
+              server_name _;
+
+              location / {
+                  default_type application/json;
+                  add_header Retry-After 300 always;
+                  return 503 '{"status":"CRITICAL_STOP","error":"SIL Ingress Quarantined. Both execution slots failed health verification. Node locked for engineering forensics."}\n';
+              }
+
+              location /health {
+                  default_type text/plain;
+                  return 503 'Maintenance Mode - Double Fault Lock\n';
+              }
+          }
+        owner: deployer
+        group: deployer
+        mode: '0644'
+      become: no
+
+    - name: Test fail-safe configuration and reload proxy
+      ansible.builtin.shell: |
+        docker exec mc-proxy nginx -t
+        docker exec mc-proxy nginx -s reload
+      become: no
+
+    # --------------------------------------------------------------------------
+    # 3. WORKLOAD QUARANTINE & AUDIT LOCK
+    # --------------------------------------------------------------------------
+    - name: Stop all faulted workload containers to release host resources
+      community.docker.docker_container:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - mc-blue
+        - mc-green
+      become: no
+
+    - name: Lock active_slot state to prevent un-triaged redeployment
+      ansible.builtin.copy:
+        content: "quarantined_double_fault"
+        dest: "{{ app_base_dir }}/active_slot"
+        owner: deployer
+        group: deployer
+        mode: '0644'
+      become: no
+
+    - name: Display critical incident summary
+      ansible.builtin.debug:
+        msg: "CRITICAL STOP ENGAGED. Node locked in 503 Maintenance Mode. Forensic logs stored at: {{ triage_dir }}"
