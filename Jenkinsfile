@@ -398,7 +398,7 @@ pipeline {
                     } catch (Exception primaryError) {
                         echo "WARNING: Primary verification failed! Invoking Phase 1 automated rollback..."
                         try {
-                            withCredentials([sshUserPrivateKey(credentialsId: 'rpi-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
+                            withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
                                 sh """
                                     set -euo pipefail
                                     cp "${SSH_KEY_FILE}" ./id_rsa_deploy
@@ -425,7 +425,7 @@ pipeline {
 
                         } catch (Exception secondaryError) {
                             echo "CRITICAL DOUBLE FAULT: Rollback failed! Invoking Phase 2 Fail-Safe Lockdown..."
-                            withCredentials([sshUserPrivateKey(credentialsId: 'rpi-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
+                            withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
                                 sh """
                                     set -euo pipefail
                                     cp "${SSH_KEY_FILE}" ./id_rsa_deploy
