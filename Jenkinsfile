@@ -369,14 +369,14 @@ pipeline {
 
                         # 4. Execute containerized Ansible deployment (Zero Host Pollution)
                         docker run --rm \
-                          -v "${HOST_WORKSPACE}:/workspace" \
-                          -e ANSIBLE_HOST_KEY_CHECKING=False \
-                          -w /workspace \
-                          alpine/ansible:latest \
-                          ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
+                        -v "${HOST_WORKSPACE}:/workspace" \
+                        -e ANSIBLE_HOST_KEY_CHECKING=False \
+                        -w /workspace \
+                        alpine/ansible:latest \
+                        ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
                             --private-key "/workspace/${KEY_TMP#./}" \
                             -u ${DEPLOY_HOST_USER} \
-                            -e "target_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \                            
+                            -e "target_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
                             -e "nexus_user=${NEXUS_USER}" \
                             -e "nexus_pass=${NEXUS_PASS}"
                     '''
