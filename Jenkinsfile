@@ -403,7 +403,7 @@ pipeline {
                         echo "WARNING: Primary verification failed! Invoking Phase 1 automated rollback..."
                         try {
                             withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
-                                sh """
+                                sh '''
                                     set -euo pipefail
                                     # 1. Resolve host workspace path for volume mounting (DooD)
                                     JENKINS_HOME_HOST=\$(docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination "/var/jenkins_home" }}{{ .Source }}{{ end }}{{ end }}')
@@ -421,9 +421,9 @@ pipeline {
                                     -e ANSIBLE_HOST_KEY_CHECKING=False \
                                     -w /workspace alpine/ansible:latest \
                                     ansible-playbook -i ansible/inventory.ini ansible/rollback.yml \
-                                    --private-key "/workspace/\${KEY_TMP#./}" \
+                                    --private-key "/workspace/${KEY_TMP#./}" \
                                     -u ${DEPLOY_HOST_USER}
-                                """
+                                '''
                             }
 
                             // 2. Post-Rollback Ingress & Functional Health Verification
@@ -439,7 +439,7 @@ pipeline {
                             withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
                                                       usernameVariable: 'JIRA_USER', 
                                                       passwordVariable: 'JIRA_TOKEN')]) {                                
-                                 sh """
+                                 sh 
                                     curl -s -f -X POST \
                                     -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
                                     -H "Accept: application/json" \
@@ -454,7 +454,7 @@ pipeline {
                         } catch (Exception rollbackError) {
                             echo "CRITICAL DOUBLE FAULT: Rollback failed! Invoking Phase 2 Fail-Safe Lockdown..."
                             withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
-                                sh """
+                                sh '''
                                     set -euo pipefail
 
                                     # 1. Resolve host workspace path for volume mounting (DooD)
@@ -465,15 +465,15 @@ pipeline {
                                     KEY_TMP="./id_rsa_deploy"
                                     cp "${SSH_KEY_FILE}" "${KEY_TMP}"
                                     chmod 600 "${KEY_TMP}"
-                                    trap 'rm -f "${KEY_TMP}"' EXIT
+                                    trap 'rm -f "${KEY_TMP}"'  EXIT INT TERM
                                     
                                     docker run --rm \
                                     -v \${HOST_WORKSPACE}:/workspace \
                                     -e ANSIBLE_HOST_KEY_CHECKING=False \
                                     -w /workspace alpine/ansible:latest \
                                     ansible-playbook -i ansible/inventory.ini ansible/fail_safe.yml \
-                                    --private-key /workspace/id_rsa_deploy -u ${DEPLOY_HOST_USER}
-                                """
+                                    --private-key "/workspace/${KEY_TMP#./}" -u ${DEPLOY_HOST_USER}
+                                '''
                             }
                             error("CRITICAL DOUBLE FAULT: SIL node locked in 503 Fail-Safe mode. Node quarantined for root-cause analysis.")
                         }
