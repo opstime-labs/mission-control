@@ -1,0 +1,6 @@
+---
+- name: Commission and Baseline SIL Target Hardware Node
+  hosts: sil_nodes
+  become: yes
+  roles:
+    - role: sil_node_baseline
