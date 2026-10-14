@@ -422,7 +422,7 @@ pipeline {
                                     -e ANSIBLE_HOST_KEY_CHECKING=False \
                                     -w /workspace alpine/ansible:latest \
                                     ansible-playbook -i ansible/inventory.ini ansible/rollback.yml \
-                                    --private-key "/workspace/${KEY_TMP#./}" \
+                                    --private-key "/workspace/\${KEY_TMP#./}" \
                                     -u ${DEPLOY_HOST_USER}
                                 """
                             }
@@ -457,7 +457,7 @@ pipeline {
                                     -e ANSIBLE_HOST_KEY_CHECKING=False \
                                     -w /workspace alpine/ansible:latest \
                                     ansible-playbook -i ansible/inventory.ini ansible/fail_safe.yml \
-                                    --private-key "/workspace/${KEY_TMP#./}" \
+                                    --private-key "/workspace/\${KEY_TMP#./}" \
                                     -u ${DEPLOY_HOST_USER}
                                 """
                             }
