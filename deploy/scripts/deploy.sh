@@ -1,15 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
+# Usage: ./deploy.sh <image_tag> <registry_username> <registry_password> [<registry_url>]
 IMAGE_TAG=${1:-"latest"}
-IMAGE="nexus.homelab.local:8082/mission-control/sensor-gateway:${IMAGE_TAG}"
+REGISTRY_USERNAME=$2
+REGISTRY_PASSWORD=$3
+REGISTRY_URL=${4:-"nexus.homelab.local:8082"}
 
+IMAGE="${REGISTRY_URL}/mission-control/sensor-gateway:${IMAGE_TAG}"
 echo "--> Target Image: ${IMAGE}"
+
 
 # Append to the top of /opt/mission-control/deploy.sh
 if ! docker pull "${IMAGE}" 2>/dev/null; then
     echo "--> Logging into Nexus Docker Registry..."
-    echo "Nexus@1212" | docker login -u "admin" --password-stdin nexus.homelab.local:8082
+    echo "${REGISTRY_PASSWORD}" | docker login -u "${REGISTRY_USERNAME}" --password-stdin "${REGISTRY_URL}"
     docker pull "${IMAGE}"
 fi
 
@@ -63,6 +68,6 @@ echo "--> Cleaning up stale deployment images..."
 docker image prune -f
 
 # Retain the active running container images while stripping older tagged layers
-docker images "nexus.homelab.local:8082/mission-control/sensor-gateway" --format "{{.Repository}}:{{.Tag}}" | \
+docker images "${REGISTRY_URL}/mission-control/sensor-gateway" --format "{{.Repository}}:{{.Tag}}" | \
   tail -n +4 | \
   xargs -r docker rmi 2>/dev/null || true
