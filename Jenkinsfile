@@ -347,6 +347,9 @@ pipeline {
                     usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS'),
                     file(credentialsId: 'ansible-vault-password-file', variable: 'VAULT_KEY_FILE')
 
+                    usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS'),
+                    file(credentialsId: 'ansible-vault-password-file', variable: 'VAULT_KEY_FILE')
+
                 ]) {
                     sh '''
                         set -euo pipefail
@@ -357,12 +360,23 @@ pipeline {
                         HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
                         
                         # 2. Create ephemeral deployment credentials file for SSH private key
+                        # 2. Create ephemeral deployment credentials file for SSH private key
                         KEY_TMP="./id_rsa_deploy"
+                        cp "${SSH_KEY_FILE}" "${KEY_TMP}"
+                        chmod 600 "${KEY_TMP}"
                         cp "${SSH_KEY_FILE}" "${KEY_TMP}"
                         chmod 600 "${KEY_TMP}"
                         # POSIX-compliant cleanup trap (EXIT runs on normal exit or failure via set -e)
                         trap 'rm -f "${KEY_TMP}"' EXIT INT TERM 
+                        trap 'rm -f "${KEY_TMP}"' EXIT INT TERM 
 
+                        # 3. Create ephemeral Ansible vault password file
+                        VAULT_TMP="./vault_pass_tmp"
+                        cp "${VAULT_KEY_FILE}" "${VAULT_TMP}"
+                        chmod 600 "${VAULT_TMP}"
+                        trap 'rm -f "${VAULT_TMP}"' EXIT INT TERM      
+
+                        # 4. Inspect active deployment slot on target SIL node
                         # 3. Create ephemeral Ansible vault password file
                         VAULT_TMP="./vault_pass_tmp"
                         cp "${VAULT_KEY_FILE}" "${VAULT_TMP}"
@@ -374,6 +388,8 @@ pipeline {
                         echo "--> Baseline active slot on SIL node: [${CURRENT_ACTIVE}]"
                       
                         # 5. Execute containerized Ansible deployment (Zero Host Pollution)
+                      
+                        # 5. Execute containerized Ansible deployment (Zero Host Pollution)
                         docker run --rm \
                         -v "${HOST_WORKSPACE}:/workspace" \
                         -e ANSIBLE_HOST_KEY_CHECKING=False \
@@ -383,6 +399,7 @@ pipeline {
                             --private-key "/workspace/${KEY_TMP#./}" \
                             -u ${DEPLOY_HOST_USER} \
                             -e "target_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
+                            --vault-password-file "/workspace/${VAULT_TMP#./}" 
                             --vault-password-file "/workspace/${VAULT_TMP#./}" 
                     '''
                 }
@@ -411,6 +428,11 @@ pipeline {
                                     REL_WORKSPACE="\${WORKSPACE#/var/jenkins_home}"
                                     HOST_WORKSPACE="\${JENKINS_HOME_HOST}\${REL_WORKSPACE}"
                                     
+                                    KEY_TMP="./id_rsa_deploy"
+                                    cp "${SSH_KEY_FILE}" "${KEY_TMP}"
+                                    chmod 600 "${KEY_TMP}"
+                                    # POSIX-compliant cleanup trap (EXIT runs on normal exit or failure via set -e)
+                                    trap 'rm -f "${KEY_TMP}"' EXIT INT TERM 
                                     KEY_TMP="./id_rsa_deploy"
                                     cp "${SSH_KEY_FILE}" "${KEY_TMP}"
                                     chmod 600 "${KEY_TMP}"
@@ -467,14 +489,17 @@ pipeline {
                                     cp "${SSH_KEY_FILE}" "${KEY_TMP}"
                                     chmod 600 "${KEY_TMP}"
                                     trap 'rm -f "${KEY_TMP}"' EXIT
+                                    KEY_TMP="./id_rsa_deploy"
+                                    cp "${SSH_KEY_FILE}" "${KEY_TMP}"
+                                    chmod 600 "${KEY_TMP}"
+                                    trap 'rm -f "${KEY_TMP}"' EXIT
 
                                     docker run --rm \
                                     -v \${HOST_WORKSPACE}:/workspace \
                                     -e ANSIBLE_HOST_KEY_CHECKING=False \
                                     -w /workspace alpine/ansible:latest \
                                     ansible-playbook -i ansible/inventory.ini ansible/fail_safe.yml \
-                                    --private-key "/workspace/\${KEY_TMP#./}" \
-                                    -u ${DEPLOY_HOST_USER}
+                                    --private-key /workspace/id_rsa_deploy -u ${DEPLOY_HOST_USER}
                                 """
                             }
                             error("CRITICAL DOUBLE FAULT: SIL node locked in 503 Fail-Safe mode. Node quarantined for root-cause analysis.")
@@ -558,6 +583,47 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                         //       -d '${jsonPayload}' \
                         //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
                         // """
+                        script {
+                            // returnStatus: true tells Jenkins not to fail the build if the shell exits with a non-zero code
+                            def exitCode = sh(
+                                script: """
+                                    set -euo pipefail
+                                    
+                                    # Build ephemeral config
+                                    CURL_CONF=\$(mktemp)
+                                    chmod 600 "\${CURL_CONF}"
+                                    trap 'rm -f "\${CURL_CONF}"' EXIT INT TERM
+                                    
+                                    AUTH_B64=\$(printf "%s:%s" "${JIRA_USER}" "${JIRA_TOKEN}" | base64 | tr -d '\\n')
+                                    echo "header = \\"Authorization: Basic \${AUTH_B64}\\"" > "\${CURL_CONF}"
+
+                                    # REMOVED '|| true' so curl's failure code propagates to the exitCode variable
+                                    curl -s -f -X POST \
+                                    -K "\${CURL_CONF}" \
+                                    -H "Accept: application/json" \
+                                    -H "Content-Type: application/json" \
+                                    -d '${jsonPayload}' \
+                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                                """,
+                                returnStatus: true
+                            )
+
+                            // Evaluate the exit code in Groovy context
+                            if (exitCode != 0) {
+                                echo "[WARNING] Jira comment failed to post (Exit Code: ${exitCode})"                                
+                            } else {
+                                echo "Jira comment posted successfully!"
+                            }
+                        }                     
+
+                        // sh """
+                        //     curl -s -f -X POST \
+                        //       -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                        //       -H "Accept: application/json" \
+                        //       -H "Content-Type: application/json" \
+                        //       -d '${jsonPayload}' \
+                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
+                        // """
                     }
                 } else {
                     echo "Notice: Branch [${env.CURRENT_BRANCH}] is an isolated branch. Skipping SIL deployment Jira telemetry to maintain clean audit baselines."
@@ -572,6 +638,47 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                     withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
                                                       usernameVariable: 'JIRA_USER', 
                                                       passwordVariable: 'JIRA_TOKEN')]) {
+                        script {
+                            // returnStatus: true tells Jenkins not to fail the build if the shell exits with a non-zero code
+                            def exitCode = sh(
+                                script: """
+                                    set -euo pipefail
+                                    
+                                    # Build ephemeral config
+                                    CURL_CONF=\$(mktemp)
+                                    chmod 600 "\${CURL_CONF}"
+                                    trap 'rm -f "\${CURL_CONF}"' EXIT INT TERM
+                                    
+                                    AUTH_B64=\$(printf "%s:%s" "${JIRA_USER}" "${JIRA_TOKEN}" | base64 | tr -d '\\n')
+                                    echo "header = \\"Authorization: Basic \${AUTH_B64}\\"" > "\${CURL_CONF}"
+
+                                    # REMOVED '|| true' so curl's failure code propagates to the exitCode variable
+                                    curl -s -f -X POST \
+                                    -K "\${CURL_CONF}" \
+                                    -H "Accept: application/json" \
+                                    -H "Content-Type: application/json" \
+                                    -d '{"body": "BASELINE DEPLOYMENT HALTED: Build [#${BUILD_NUMBER}|${env.BUILD_URL}] (${GIT_COMMIT_SHORT}) on branch \\"${env.CURRENT_BRANCH}\\" failed execution.\\n\\nInspect Console Log: ${env.BUILD_URL}console"}' \
+                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                                """,
+                                returnStatus: true
+                            )
+
+                            // Evaluate the exit code in Groovy context
+                            if (exitCode != 0) {
+                                echo "[WARNING] Jira comment failed to post (Exit Code: ${exitCode})"                                
+                            } else {
+                                echo "Jira comment posted successfully!"
+                            }
+                        }
+
+                        // sh """
+                        //     curl -s -f -X POST \
+                        //       -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                        //       -H "Accept: application/json" \
+                        //       -H "Content-Type: application/json" \
+                        //       -d '{"body": "BASELINE DEPLOYMENT HALTED: Build [#${BUILD_NUMBER}|${env.BUILD_URL}] (${GIT_COMMIT_SHORT}) on branch \\"${env.CURRENT_BRANCH}\\" failed execution.\\n\\nInspect Console Log: ${env.BUILD_URL}console"}' \
+                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                        // """
                         script {
                             // returnStatus: true tells Jenkins not to fail the build if the shell exits with a non-zero code
                             def exitCode = sh(
