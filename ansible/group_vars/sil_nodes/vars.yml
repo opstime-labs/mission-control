@@ -1,0 +1,3 @@
+---
+nexus_user: "{{ vault_nexus_user }}"
+nexus_pass: "{{ vault_nexus_pass }}"
