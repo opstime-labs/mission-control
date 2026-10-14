@@ -439,7 +439,7 @@ pipeline {
                             withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
                                                       usernameVariable: 'JIRA_USER', 
                                                       passwordVariable: 'JIRA_TOKEN')]) {                                
-                                 sh 
+                                 sh """
                                     curl -s -f -X POST \
                                     -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
                                     -H "Accept: application/json" \
