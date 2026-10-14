@@ -25,7 +25,8 @@ pipeline {
         DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
         DOTNET_NOLOGO                     = 'true'
         ContinuousIntegrationBuild        = 'true'
-        DOTNET_SDK_IMAGE                  = 'mcr.microsoft.com/dotnet/sdk:8.0-jammy'
+        // DOTNET_SDK_IMAGE                  = 'mcr.microsoft.com/dotnet/sdk:8.0-jammy'
+        DOTNET_SDK_IMAGE                  = 'nexus.homelab.local:8082/infrastructure/dotnet8-sdk-sonar:8.0-java21'
         SONAR_HOST_URL                    = 'http://10.0.0.182:9000'
         SONAR_PROJECT_KEY                 = 'mission-control-api'
         REGISTRY_HOST                     = 'nexus.homelab.local:8082'
@@ -104,11 +105,7 @@ pipeline {
                               -e SONAR_TOKEN="${SONAR_TOKEN}" \
                               ${DOTNET_SDK_IMAGE} \
                               bash -c '
-                                set -euo pipefail
-
-                                echo "--> [Environment] Initializing Java runtime and SonarScanner CLI..."
-                                apt-get update -qq && apt-get install -y -qq openjdk-17-jre-headless > /dev/null
-                                dotnet tool install --tool-path /tmp/tools dotnet-sonarscanner
+                                set -euo pipefail                               
 
                                 echo "--> [CGP Audit] Restoring locked dependencies from local Nexus feed..."
                                 dotnet restore MissionControl.sln \
