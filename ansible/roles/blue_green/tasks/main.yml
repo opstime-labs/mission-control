@@ -42,11 +42,25 @@
 # ==============================================================================
 # PHASE 2: IMAGE STAGING & CANDIDATE SLOT STARTUP
 # ==============================================================================
+- name: Log in to air-gapped Nexus OCI registry on target node
+  community.docker.docker_login:
+    registry_url: "{{ registry_host }}"
+    username: "{{ nexus_user }}"
+    password: "{{ nexus_pass }}"
+    reauthorize: yes
+  become: no
+
 - name: Pull release container image from local Nexus registry
   community.docker.docker_image:
     name: "{{ registry_host }}/{{ image_name }}:{{ target_tag }}"
     source: pull
     force_source: true
+  become: no
+
+- name: Log out from Nexus registry to prevent cached credentials at rest
+  community.docker.docker_login:
+    registry_url: "{{ registry_host }}"
+    state: absent
   become: no
 
 - name: Ensure target idle slot container is running
