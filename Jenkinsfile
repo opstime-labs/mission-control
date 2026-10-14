@@ -95,7 +95,7 @@ pipeline {
 
                     withCredentials([
                         string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN'),
-                        usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {                       ]) {
+                        usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                         sh """
                             echo "--> Authenticating Docker daemon to Nexus..."
                             echo "\$NEXUS_PASS" | docker login -u "\$NEXUS_USER" --password-stdin "${REGISTRY_HOST}"
