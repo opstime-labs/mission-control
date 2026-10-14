@@ -28,8 +28,7 @@ pipeline {
         DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
         DOTNET_NOLOGO                     = 'true'
         ContinuousIntegrationBuild        = 'true'
-        // DOTNET_SDK_IMAGE                  = 'mcr.microsoft.com/dotnet/sdk:8.0-jammy'
-        DOTNET_SDK_IMAGE                  = "${env.REGISTRY_HOST}/infrastructure/dotnet8-sdk-sonar:8.0-java21"
+        DOTNET_BUILDER_IMAGE              = "${env.REGISTRY_HOST}/infrastructure/dotnet-builder:8.0.11-jdk21-sonar9.0.1-r1"        
         SONAR_HOST_URL                    = 'http://10.0.0.182:9000'
         SONAR_PROJECT_KEY                 = 'mission-control-api'
         REGISTRY_HOST                     = 'nexus.homelab.local:8082'
@@ -52,7 +51,7 @@ pipeline {
     stages {
         stage('Stage 1: Configuration Audit & Traceability Gate') {
             steps {
-                script {
+                script { 
                     // Check PR source branch, PR title, or fallback to the last 5 commit logs
                     def prSourceBranch = env.CHANGE_BRANCH ?: ""
                     def prTitle        = env.CHANGE_TITLE ?: ""
@@ -107,11 +106,11 @@ pipeline {
                               -e HOME=/tmp \
                               -e DOTNET_CLI_HOME=/tmp/.dotnet \
                               -e NUGET_PACKAGES=/tmp/.nuget/packages \
-                              -e PATH="/tmp/tools:\$PATH" \
+                              -e PATH="/usr/local/bin:/usr/bin:/bin:\$PATH" \
                               -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
                               -e ContinuousIntegrationBuild=true \
                               -e SONAR_TOKEN="${SONAR_TOKEN}" \
-                              ${DOTNET_SDK_IMAGE} \
+                              ${DOTNET_BUILDER_IMAGE} \
                               bash -c '
                                 set -euo pipefail                               
 
