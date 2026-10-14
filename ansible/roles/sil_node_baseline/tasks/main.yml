@@ -1,0 +1,38 @@
+---
+- name: Ensure mission-control binary directory exists
+  ansible.builtin.file:
+    path: "{{ app_base_dir }}/bin"
+    state: directory
+    owner: deployer
+    group: deployer
+    mode: '0755'
+  become: yes
+
+- name: Deploy versioned sil-watchdog script
+  ansible.builtin.copy:
+    src: files/sil-watchdog.sh
+    dest: "{{ app_base_dir }}/bin/sil-watchdog.sh"
+    owner: deployer
+    group: deployer
+    mode: '0750'
+  notify: Restart sil-watchdog service
+  become: yes
+
+- name: Deploy sil-watchdog systemd unit configuration
+  ansible.builtin.template:
+    src: sil-watchdog.service.j2
+    dest: /etc/systemd/system/sil-watchdog.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - Reload systemd daemon
+    - Restart sil-watchdog service
+  become: yes
+
+- name: Ensure sil-watchdog daemon is enabled and running
+  ansible.builtin.systemd:
+    name: sil-watchdog.service
+    enabled: yes
+    state: started
+  become: yes

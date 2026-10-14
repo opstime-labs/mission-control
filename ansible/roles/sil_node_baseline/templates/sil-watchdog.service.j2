@@ -1,0 +1,17 @@
+[Unit]
+Description=Mission-Control Local SIL Autonomous Watchdog
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User={{ deploy_user | default('deployer') }}
+Group={{ deploy_group | default('deployer') }}
+ExecStart={{ app_base_dir }}/bin/sil-watchdog.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

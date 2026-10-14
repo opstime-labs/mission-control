@@ -1,0 +1,11 @@
+---
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: yes
+  become: yes
+
+- name: Restart sil-watchdog service
+  ansible.builtin.systemd:
+    name: sil-watchdog.service
+    state: restarted
+  become: yes

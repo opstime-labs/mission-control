@@ -419,16 +419,32 @@ pipeline {
                                 """
                             }
 
-                            // Verify fallback ingress
+                            // 2. Post-Rollback Ingress & Functional Health Verification
                             sh """
                                 set -euo pipefail
                                 echo "--> Verifying fallback slot ingress..."
                                 curl --fail --retry 3 --retry-delay 2 --max-time 5 "${params.HEALTH_CHECK_URL}"
                             """
-                            echo "RECOVERY: Rollback to previous slot succeeded. Pipeline marked UNSTABLE."
+                            echo "RECOVERY CONFIRMED: Restored slot is healthy, but operating in DEGRADED (single-slot) mode."
                             currentBuild.result = 'UNSTABLE'
 
-                        } catch (Exception secondaryError) {
+                            // 3. Post Degraded State Telemetry to Jira
+                            withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', 
+                                                      usernameVariable: 'JIRA_USER', 
+                                                      passwordVariable: 'JIRA_TOKEN')]) {                                
+                                 sh """
+                                    curl -s -f -X POST \
+                                    -u "\${JIRA_USER}:\${JIRA_TOKEN}" \
+                                    -H "Accept: application/json" \
+                                    -H "Content-Type: application/json" \
+                                    -d '{
+                                        "body": "⚠️ DEGRADED DEPLOYMENT ALERT: Release Candidate ['"${TARGET_TAG}"'] failed post-deployment smoke test.\\n\\nAutomated rollback succeeded. Target node is currently running in DEGRADED SINGLE-SLOT MODE on the fallback baseline.\\n\\nAction Required: Inspect forensic triage logs on SIL node before re-attempting deployment."
+                                    }' \
+                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                                """
+                            }
+
+                        } catch (Exception rollbackError) {
                             echo "CRITICAL DOUBLE FAULT: Rollback failed! Invoking Phase 2 Fail-Safe Lockdown..."
                             withCredentials([sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE')]) {
                                 sh """
