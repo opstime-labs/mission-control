@@ -345,12 +345,7 @@ pipeline {
                 withCredentials([
                     sshUserPrivateKey(credentialsId: 'sil-node-ssh-key', keyFileVariable: 'SSH_KEY_FILE'),
                     usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS'),
-                    file(credentialsId: 'ansible-vault-password-file', variable: 'VAULT_KEY_FILE')
-
-                    usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS'),
-                    file(credentialsId: 'ansible-vault-password-file', variable: 'VAULT_KEY_FILE')
-
-                ]) {
+                    file(credentialsId: 'ansible-vault-password-file', variable: 'VAULT_KEY_FILE')]) {
                     sh '''
                         set -euo pipefail
 
@@ -360,35 +355,23 @@ pipeline {
                         HOST_WORKSPACE="${JENKINS_HOME_HOST}${REL_WORKSPACE}"
                         
                         # 2. Create ephemeral deployment credentials file for SSH private key
-                        # 2. Create ephemeral deployment credentials file for SSH private key
                         KEY_TMP="./id_rsa_deploy"
                         cp "${SSH_KEY_FILE}" "${KEY_TMP}"
                         chmod 600 "${KEY_TMP}"
-                        cp "${SSH_KEY_FILE}" "${KEY_TMP}"
-                        chmod 600 "${KEY_TMP}"
+                        
                         # POSIX-compliant cleanup trap (EXIT runs on normal exit or failure via set -e)
                         trap 'rm -f "${KEY_TMP}"' EXIT INT TERM 
-                        trap 'rm -f "${KEY_TMP}"' EXIT INT TERM 
 
                         # 3. Create ephemeral Ansible vault password file
                         VAULT_TMP="./vault_pass_tmp"
                         cp "${VAULT_KEY_FILE}" "${VAULT_TMP}"
                         chmod 600 "${VAULT_TMP}"
-                        trap 'rm -f "${VAULT_TMP}"' EXIT INT TERM      
-
-                        # 4. Inspect active deployment slot on target SIL node
-                        # 3. Create ephemeral Ansible vault password file
-                        VAULT_TMP="./vault_pass_tmp"
-                        cp "${VAULT_KEY_FILE}" "${VAULT_TMP}"
-                        chmod 600 "${VAULT_TMP}"
-                        trap 'rm -f "${VAULT_TMP}"' EXIT INT TERM      
+                        trap 'rm -f "${VAULT_TMP}"' EXIT INT TERM                             
 
                         # 4. Inspect active deployment slot on target SIL node
                         CURRENT_ACTIVE=$(ssh -i "${SSH_KEY_FILE}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
                         echo "--> Baseline active slot on SIL node: [${CURRENT_ACTIVE}]"
-                      
-                        # 5. Execute containerized Ansible deployment (Zero Host Pollution)
-                      
+                                        
                         # 5. Execute containerized Ansible deployment (Zero Host Pollution)
                         docker run --rm \
                         -v "${HOST_WORKSPACE}:/workspace" \
@@ -399,8 +382,7 @@ pipeline {
                             --private-key "/workspace/${KEY_TMP#./}" \
                             -u ${DEPLOY_HOST_USER} \
                             -e "target_tag=${BUILD_NUMBER}-${GIT_COMMIT_SHORT}" \
-                            --vault-password-file "/workspace/${VAULT_TMP#./}" 
-                            --vault-password-file "/workspace/${VAULT_TMP#./}" 
+                            --vault-password-file "/workspace/${VAULT_TMP#./}"                           
                     '''
                 }
             }
@@ -432,12 +414,7 @@ pipeline {
                                     cp "${SSH_KEY_FILE}" "${KEY_TMP}"
                                     chmod 600 "${KEY_TMP}"
                                     # POSIX-compliant cleanup trap (EXIT runs on normal exit or failure via set -e)
-                                    trap 'rm -f "${KEY_TMP}"' EXIT INT TERM 
-                                    KEY_TMP="./id_rsa_deploy"
-                                    cp "${SSH_KEY_FILE}" "${KEY_TMP}"
-                                    chmod 600 "${KEY_TMP}"
-                                    # POSIX-compliant cleanup trap (EXIT runs on normal exit or failure via set -e)
-                                    trap 'rm -f "${KEY_TMP}"' EXIT INT TERM 
+                                    trap 'rm -f "${KEY_TMP}"' EXIT INT TERM                                     
 
                                     docker run --rm \
                                     -v \${HOST_WORKSPACE}:/workspace \
@@ -489,11 +466,7 @@ pipeline {
                                     cp "${SSH_KEY_FILE}" "${KEY_TMP}"
                                     chmod 600 "${KEY_TMP}"
                                     trap 'rm -f "${KEY_TMP}"' EXIT
-                                    KEY_TMP="./id_rsa_deploy"
-                                    cp "${SSH_KEY_FILE}" "${KEY_TMP}"
-                                    chmod 600 "${KEY_TMP}"
-                                    trap 'rm -f "${KEY_TMP}"' EXIT
-
+                                    
                                     docker run --rm \
                                     -v \${HOST_WORKSPACE}:/workspace \
                                     -e ANSIBLE_HOST_KEY_CHECKING=False \
