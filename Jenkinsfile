@@ -13,7 +13,9 @@ pipeline {
         booleanParam(name: 'PUBLISH_DOCKER_IMAGE', defaultValue: false, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
         booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
         booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
-        booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: false, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
+        booleanParam(name: 'DEPLOY_TO_SIL_VIA_ANSIBLE', defaultValue: false, description: 'Check to enable deploying the built Docker image to the SIL target node via Ansible for integration testing')
+        booleanParam(name: 'DEPLOY_TO_SIL_VIA_SSH_AGENT', defaultValue: false, description: 'Check to enable deploying the built Docker image to the SIL target node via SSH agent for integration testing')
+        booleanParam(name: 'DEPLOY_TO_SIL_VIA_JENKINS_AGENT', defaultValue: false, description: 'Check to enable deploying the built Docker image to the SIL target node via Jenkins agent for integration testing')
         booleanParam(name: 'ROLLBACK', defaultValue: false, description: 'Check to enable rolling back to a previous deployment')
         booleanParam(name: 'RUN_SMOKE_TEST', defaultValue: false, description: 'Check to enable running smoke tests on the deployed application')
         
@@ -64,13 +66,13 @@ pipeline {
                         error("CONFIGURATION AUDIT GATE FAILURE: No Jira issue key found in PR source [${prSourceBranch}], title [${prTitle}], branch [${env.CURRENT_BRANCH}], or recent commits. Defence compliance requires an active work item.")
                     }
 
-                    env.JIRA_KEY = jiraMatcher[0][1].toUpperCase()
-                    currentBuild.displayName = "#${BUILD_NUMBER} [${env.JIRA_KEY}]"
+                    env.JIRA_ID = jiraMatcher[0][1].toUpperCase()
+                    currentBuild.displayName = "#${BUILD_NUMBER} [${env.JIRA_ID}]"
                     currentBuild.description = "SHA: ${GIT_COMMIT_SHORT} | Ref: ${env.CURRENT_BRANCH}"
 
                     echo "=========================================================="
                     echo "Traceability Audit Gate: PASSED"
-                    echo "Jira Work Item:     ${env.JIRA_KEY}"
+                    echo "Jira Work Item:     ${env.JIRA_ID}"
                     echo "Commit SHA:         ${GIT_COMMIT_SHORT}"
                     echo "Canonical Branch:   ${env.CURRENT_BRANCH}"
                     echo "Target SIL Node:    ${env.DEPLOY_SIL_AGENT_NAME} (RPi 400)"
@@ -287,63 +289,63 @@ pipeline {
             }
         }
 
-        // stage('Stage 6: Deploy to SIL Target Node (Running as Jenkins Agent)') {
-        //     when {
-        //         beforeAgent true
-        //         allOf {
-        //             expression { params.DEPLOY_TO_SIL == true }
-        //             expression { return env.CURRENT_BRANCH in ['main', 'master'] }
-        //         }
-        //     }
-        //     agent {
-        //         label env.DEPLOY_SIL_AGENT_NAME
-        //     }
-        //     steps {
-        //         sh '''
-        //             set -euo pipefail
-        //             mkdir -p /opt/mission-control
-        //             cp deploy/scripts/deploy.sh /opt/mission-control/deploy.sh
-        //             chmod 750 /opt/mission-control/deploy.sh
-        //             /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
-        //         '''
-        //     }
-        // }
-
-        // stage('Stage 6: Deploy to SIL Target Node (SSH Standalone)') {
-        //     when {
-        //         beforeAgent true
-        //         allOf {
-        //             expression { params.DEPLOY_TO_SIL == true }
-        //             expression { return env.CURRENT_BRANCH in ['main', 'master'] }
-        //         }
-        //     }
-        //     // Runs on standard Linux build worker (no agent needed on target hardware)
-        //     agent { 
-        //         label env.BUILD_NODE_LABEL 
-        //     }
-        //     steps {
-        //         sshagent(credentials: ['sil-node-ssh-key']) {
-        //             sh '''
-        //                 set -euo pipefail                        
-        //                 echo "--> Synchronizing deployment scripts to standalone SIL hardware..."
-        //                 ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "mkdir -p /tmp/mission-control"
-        //                 scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${DEPLOY_HOST_SSH}:/tmp/mission-control/deploy.sh
-                       
-        //                 echo "--> Triggering blue-green cutover for baseline ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}..."
-        //                 ssh ${DEPLOY_HOST_SSH} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
-
-        //                 echo "--> Cleaning up temporary deployment artifacts on SIL node..."
-        //                 ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "rm -rf /tmp/mission-control"
-        //             '''
-        //         }
-        //     }            
-        // }
-
-        stage('Stage 6: Deploy to SIL Node via Ansible') {
+        stage('Stage 6: Deploy to SIL Target Node (Running as Jenkins Agent)') {
             when {
                 beforeAgent true
                 allOf {
-                    expression { params.DEPLOY_TO_SIL == true }
+                    expression { params.DEPLOY_TO_SIL_VIA_JENKINS_AGENT == true }
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                }
+            }
+            agent {
+                label env.DEPLOY_SIL_AGENT_NAME
+            }
+            steps {
+                sh '''
+                    set -euo pipefail
+                    mkdir -p /opt/mission-control
+                    cp deploy/scripts/deploy.sh /opt/mission-control/deploy.sh
+                    chmod 750 /opt/mission-control/deploy.sh
+                    /opt/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}
+                '''
+            }
+        }
+
+        stage('Stage 7: Deploy to SIL Target Node (SSH Standalone)') {
+            when {
+                beforeAgent true
+                allOf {
+                    expression { params.DEPLOY_TO_SIL_VIA_SSH_AGENT == true }
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                }
+            }
+            // Runs on standard Linux build worker (no agent needed on target hardware)
+            agent { 
+                label env.BUILD_NODE_LABEL 
+            }
+            steps {
+                sshagent(credentials: ['sil-node-ssh-key']) {
+                    sh '''
+                        set -euo pipefail                        
+                        echo "--> Synchronizing deployment scripts to standalone SIL hardware..."
+                        ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "mkdir -p /tmp/mission-control"
+                        scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${DEPLOY_HOST_SSH}:/tmp/mission-control/deploy.sh
+                       
+                        echo "--> Triggering blue-green cutover for baseline ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}..."
+                        ssh ${DEPLOY_HOST_SSH} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${BUILD_NUMBER}-${GIT_COMMIT_SHORT}"
+
+                        echo "--> Cleaning up temporary deployment artifacts on SIL node..."
+                        ssh -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_SSH} "rm -rf /tmp/mission-control"
+                    '''
+                }
+            }            
+        }
+
+        stage('Stage 8: Deploy to SIL Node via Ansible') {
+            when {
+                beforeAgent true
+                allOf {
+                    expression { params.DEPLOY_TO_SIL_VIA_ANSIBLE == true }
                     // Enforce deployment gate: only release/main baselines deploy to physical SIL hardware
                     expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
@@ -393,12 +395,13 @@ pipeline {
                     '''
                 }
             }
-        } // end of Stage 6
+        } // end of Stage 8
 
-        stage('Stage 7: Smoke Test & Automated Recovery') {
+        stage('Stage 9: Smoke Test & Automated Recovery') {
             when {
                 beforeAgent true
                 allOf {
+                    expression { params.DEPLOY_TO_SIL_VIA_ANSIBLE == true }
                     expression { params.RUN_SMOKE_TEST == true }
                     // Enforce deployment gate: only release/main baselines deploy to physical SIL hardware
                     expression { return env.CURRENT_BRANCH in ['main', 'master'] }
@@ -462,7 +465,7 @@ pipeline {
                                     -d '{
                                         "body": "⚠️ DEGRADED DEPLOYMENT ALERT: Release Candidate ['"${TARGET_TAG}"'] failed post-deployment smoke test.\\n\\nAutomated rollback succeeded. Target node is currently running in DEGRADED SINGLE-SLOT MODE on the fallback baseline.\\n\\nAction Required: Inspect forensic triage logs on SIL node before re-attempting deployment."
                                     }' \
-                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_ID}/comment"
                                 """
                             }
 
@@ -551,7 +554,7 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                                     -H "Accept: application/json" \
                                     -H "Content-Type: application/json" \
                                     -d '${jsonPayload}' \
-                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_ID}/comment"
                                 """,
                                 returnStatus: true
                             )
@@ -570,7 +573,7 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                         //       -H "Accept: application/json" \
                         //       -H "Content-Type: application/json" \
                         //       -d '${jsonPayload}' \
-                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
+                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_ID}/comment" || true
                         // """
                         script {
                             // returnStatus: true tells Jenkins not to fail the build if the shell exits with a non-zero code
@@ -592,7 +595,7 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                                     -H "Accept: application/json" \
                                     -H "Content-Type: application/json" \
                                     -d '${jsonPayload}' \
-                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_ID}/comment"
                                 """,
                                 returnStatus: true
                             )
@@ -611,7 +614,7 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                         //       -H "Accept: application/json" \
                         //       -H "Content-Type: application/json" \
                         //       -d '${jsonPayload}' \
-                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment" || true
+                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_ID}/comment" || true
                         // """
                     }
                 } else {
@@ -647,7 +650,7 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                                     -H "Accept: application/json" \
                                     -H "Content-Type: application/json" \
                                     -d '{"body": "BASELINE DEPLOYMENT HALTED: Build [#${BUILD_NUMBER}|${env.BUILD_URL}] (${GIT_COMMIT_SHORT}) on branch \\"${env.CURRENT_BRANCH}\\" failed execution.\\n\\nInspect Console Log: ${env.BUILD_URL}console"}' \
-                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_ID}/comment"
                                 """,
                                 returnStatus: true
                             )
@@ -666,7 +669,7 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                         //       -H "Accept: application/json" \
                         //       -H "Content-Type: application/json" \
                         //       -d '{"body": "BASELINE DEPLOYMENT HALTED: Build [#${BUILD_NUMBER}|${env.BUILD_URL}] (${GIT_COMMIT_SHORT}) on branch \\"${env.CURRENT_BRANCH}\\" failed execution.\\n\\nInspect Console Log: ${env.BUILD_URL}console"}' \
-                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_ID}/comment"
                         // """
                         script {
                             // returnStatus: true tells Jenkins not to fail the build if the shell exits with a non-zero code
@@ -688,7 +691,7 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                                     -H "Accept: application/json" \
                                     -H "Content-Type: application/json" \
                                     -d '{"body": "BASELINE DEPLOYMENT HALTED: Build [#${BUILD_NUMBER}|${env.BUILD_URL}] (${GIT_COMMIT_SHORT}) on branch \\"${env.CURRENT_BRANCH}\\" failed execution.\\n\\nInspect Console Log: ${env.BUILD_URL}console"}' \
-                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                                    "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_ID}/comment"
                                 """,
                                 returnStatus: true
                             )
@@ -707,7 +710,7 @@ _Audit baseline recorded for Controlled Goods and V&V compliance._"""
                         //       -H "Accept: application/json" \
                         //       -H "Content-Type: application/json" \
                         //       -d '{"body": "BASELINE DEPLOYMENT HALTED: Build [#${BUILD_NUMBER}|${env.BUILD_URL}] (${GIT_COMMIT_SHORT}) on branch \\"${env.CURRENT_BRANCH}\\" failed execution.\\n\\nInspect Console Log: ${env.BUILD_URL}console"}' \
-                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_KEY}/comment"
+                        //       "${params.JIRA_ISSUE_API_ENDPOINT}/${env.JIRA_ID}/comment"
                         // """
                     }
                 } else {
