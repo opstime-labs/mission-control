@@ -76,7 +76,7 @@ pipeline {
                     echo "Target SIL Node:    ${env.DEPLOY_SIL_AGENT_NAME} (RPi 400)"
                     echo "=========================================================="
                 }
-            }
+            }            
         }
         
         stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {
@@ -155,6 +155,8 @@ pipeline {
                                   /p:ContinuousIntegrationBuild=true \
                                   /p:UseAppHost=false
                               '
+                            echo "--> Cleaning up Docker daemon credentials..."
+                            docker logout "${REGISTRY_HOST}"
                         """
                     }
                 }
@@ -164,8 +166,36 @@ pipeline {
                     junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'TestResults/*.trx'
                 }
-            }
-        }
+                success {
+                    script {
+                        // Prune tags via Nexus REST API keeping only the last 5 release tags
+                        withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                            sh '''
+                                set -euo pipefail
+                                REPO_NAME="docker-hosted"
+                                IMAGE_NAME="mission-control/sensor-gateway"
+                                KEEP_COUNT=5
+
+                                # Fetch list of component IDs sorted by version/date
+                                COMPONENTS_JSON=$(curl -s -u "${NEXUS_USER}:${NEXUS_PASS}" \
+                                "http://10.0.0.182:8081/service/rest/v1/components?repository=${REPO_NAME}")
+
+                                # Extract tags belonging to sensor-gateway, excluding 'latest'
+                                OLD_COMPONENT_IDS=$(echo "${COMPONENTS_JSON}" | jq -r \
+                                --arg img "${IMAGE_NAME}" \
+                                '.items[] | select(.name == $img and .version != "latest") | .id' | tail -n +$((KEEP_COUNT + 1)))
+
+                                for comp_id in ${OLD_COMPONENT_IDS}; do
+                                    echo "Pruning expired component ID: ${comp_id}"
+                                    curl -s -X DELETE -u "${NEXUS_USER}:${NEXUS_PASS}" \
+                                    "http://10.0.0.182:8081/service/rest/v1/components/${comp_id}"
+                                done
+                            '''
+                        }
+                    } // end of success
+                }
+            }  // end of post         
+        } // end of Stage 2
 
         stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
             when {
