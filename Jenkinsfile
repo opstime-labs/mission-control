@@ -28,7 +28,7 @@ pipeline {
         DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
         DOTNET_NOLOGO                     = 'true'
         ContinuousIntegrationBuild        = 'true'
-        DOTNET_BUILDER_IMAGE              = "${env.REGISTRY_HOST}/infrastructure/dotnet-builder:8.0.11-jdk21-sonar9.0.1-r1"        
+        DOTNET_BUILDER_IMAGE              = "${env.REGISTRY_HOST}/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r1"        
         SONAR_HOST_URL                    = 'http://10.0.0.182:9000'
         SONAR_PROJECT_KEY                 = 'mission-control-api'
         REGISTRY_HOST                     = 'nexus.homelab.local:8082'

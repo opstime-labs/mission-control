@@ -1,5 +1,5 @@
-# Stage 1: Build & Publish
-FROM mcr.microsoft.com/dotnet/sdk:8.0-jammy AS build
+# Stage 1: Build & Publish via .NET 10 SDK
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
 WORKDIR /src
 
 COPY Directory.Build.props nuget.config ./
@@ -11,7 +11,6 @@ RUN dotnet restore src/MissionControl.Api/MissionControl.Api.csproj \
     --locked-mode
 
 COPY src/MissionControl.Api/ src/MissionControl.Api/
-
 WORKDIR /src/src/MissionControl.Api
 RUN dotnet publish MissionControl.Api.csproj \
     -c Release \
@@ -20,12 +19,11 @@ RUN dotnet publish MissionControl.Api.csproj \
     /p:ContinuousIntegrationBuild=true \
     /p:UseAppHost=false
 
-# Stage 2: Distroless Hardened Runtime (Ubuntu Chiseled)
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled AS final
+# Stage 2: Distroless Chiseled Runtime (.NET 10)
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled AS final
 WORKDIR /app
 
 USER $APP_UID
-
 COPY --from=build --chown=$APP_UID:$APP_UID /app/publish .
 
 ENV ASPNETCORE_HTTP_PORTS=8080 \
@@ -33,5 +31,4 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 EXPOSE 8080
-
 ENTRYPOINT ["dotnet", "MissionControl.Api.dll"]
