@@ -197,8 +197,7 @@ pipeline {
                             '''
                         }
                     }
-            } // end of success
-                }
+                } // end of success        
             }  // end of post         
         } // end of Stage 2
 
