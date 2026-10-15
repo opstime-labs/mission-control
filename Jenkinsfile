@@ -168,40 +168,39 @@ pipeline {
                     echo "--> Post Stage2: Archiving test results and artifacts for V&V audit trail..."
                     junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'TestResults/*.trx'
-                }
-                when {
-                    expression { params.PUBLISH_RAW_RELEASE_ARTIFACTS == true }
-                }
-                success {
-                    echo "--> Post Stage2: Publishing raw binary release artifacts to Nexus..."
+                }             
+                success {                    
                     script {
-                        withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                            sh """
-                                set -euo pipefail
-                                RELEASE_DIR="release_dist"
-                                mkdir -p "\${RELEASE_DIR}"
+                        if (params.PUBLISH_RAW_RELEASE_ARTIFACTS == true) {
+                            echo "--> Post Stage2: Publishing raw binary release artifacts to Nexus..."
+                            withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                                sh """
+                                    set -euo pipefail
+                                    RELEASE_DIR="release_dist"
+                                    mkdir -p "\${RELEASE_DIR}"
 
-                                ARTIFACT_NAME="mission-control-api-${BUILD_NUMBER}-${GIT_COMMIT_SHORT}.tar.gz"
-                                CHECKSUM_NAME="\${ARTIFACT_NAME}.sha256"
+                                    ARTIFACT_NAME="mission-control-api-${BUILD_NUMBER}-${GIT_COMMIT_SHORT}.tar.gz"
+                                    CHECKSUM_NAME="\${ARTIFACT_NAME}.sha256"
 
-                                echo "--> Packaging raw binary release artifacts..."
-                                tar -czf "\${RELEASE_DIR}/\${ARTIFACT_NAME}" -C "${WORKSPACE}/publish_raw" .
-                                cd "\${RELEASE_DIR}"
-                                sha256sum "\${ARTIFACT_NAME}" > "\${CHECKSUM_NAME}"
+                                    echo "--> Packaging raw binary release artifacts..."
+                                    tar -czf "\${RELEASE_DIR}/\${ARTIFACT_NAME}" -C "${WORKSPACE}/publish_raw" .
+                                    cd "\${RELEASE_DIR}"
+                                    sha256sum "\${ARTIFACT_NAME}" > "\${CHECKSUM_NAME}"
 
-                                UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/${BUILD_NUMBER}"
+                                    UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/${BUILD_NUMBER}"
 
-                                echo "--> Uploading binary package: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
-                                curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
-                                --upload-file "\${ARTIFACT_NAME}" \
-                                "\${UPLOAD_URL}/\${ARTIFACT_NAME}"
+                                    echo "--> Uploading binary package: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
+                                    curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
+                                    --upload-file "\${ARTIFACT_NAME}" \
+                                    "\${UPLOAD_URL}/\${ARTIFACT_NAME}"
 
-                                echo "--> Uploading SHA-256 verification hash: \${UPLOAD_URL}/\${CHECKSUM_NAME}"
-                                curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
-                                --upload-file "\${CHECKSUM_NAME}" \
-                                "\${UPLOAD_URL}/\${CHECKSUM_NAME}"
-                            """
-                        } //end of withCredentials                                    
+                                    echo "--> Uploading SHA-256 verification hash: \${UPLOAD_URL}/\${CHECKSUM_NAME}"
+                                    curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
+                                    --upload-file "\${CHECKSUM_NAME}" \
+                                    "\${UPLOAD_URL}/\${CHECKSUM_NAME}"
+                                """
+                            } //end of withCredentials
+                        } //end of if publish raw artifacts                                   
                     } //end of script
                 } //end of success
             } //end of post
