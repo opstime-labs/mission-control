@@ -10,9 +10,9 @@ pipeline {
     // Jenkins UI parameters for operator-controlled gates
     parameters {
         booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: true, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
-        booleanParam(name: 'PUBLISH_DOCKER_IMAGE', defaultValue: false, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
-        booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
-        booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
+        booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: true, description: 'Check to enable publishing raw binary release artifacts to Nexus')
+        booleanParam(name: 'BUILD_PUBLISH_DOCKER_IMAGE', defaultValue: false, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
+        booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')        
         booleanParam(name: 'DEPLOY_TO_SIL_VIA_ANSIBLE', defaultValue: false, description: 'Check to enable deploying the built Docker image to the SIL target node via Ansible for integration testing')
         booleanParam(name: 'DEPLOY_TO_SIL_VIA_SSH_AGENT', defaultValue: false, description: 'Check to enable deploying the built Docker image to the SIL target node via SSH agent for integration testing')
         booleanParam(name: 'DEPLOY_TO_SIL_VIA_JENKINS_AGENT', defaultValue: false, description: 'Check to enable deploying the built Docker image to the SIL target node via Jenkins agent for integration testing')
@@ -168,9 +168,43 @@ pipeline {
                     echo "--> Post Stage2: Archiving test results and artifacts for V&V audit trail..."
                     junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'TestResults/*.trx'
-                }                       
-            } 
-        } // end of Stage 2
+                }             
+                success {                    
+                    script {
+                        if (['main', 'master'].contains(env.BRANCH_NAME) && params.PUBLISH_RAW_RELEASE_ARTIFACTS) {
+                            echo "--> Post Stage2: Publishing raw binary release artifacts to Nexus..."
+                            withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                                sh """
+                                    set -euo pipefail
+                                    RELEASE_DIR="release_dist"
+                                    mkdir -p "\${RELEASE_DIR}"
+
+                                    ARTIFACT_NAME="mission-control-api-${BUILD_NUMBER}-${GIT_COMMIT_SHORT}.tar.gz"
+                                    CHECKSUM_NAME="\${ARTIFACT_NAME}.sha256"
+
+                                    echo "--> Packaging raw binary release artifacts..."
+                                    tar -czf "\${RELEASE_DIR}/\${ARTIFACT_NAME}" -C "${WORKSPACE}/publish_raw" .
+                                    cd "\${RELEASE_DIR}"
+                                    sha256sum "\${ARTIFACT_NAME}" > "\${CHECKSUM_NAME}"
+
+                                    UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/${BUILD_NUMBER}"
+
+                                    echo "--> Uploading binary package: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
+                                    curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
+                                    --upload-file "\${ARTIFACT_NAME}" \
+                                    "\${UPLOAD_URL}/\${ARTIFACT_NAME}"
+
+                                    echo "--> Uploading SHA-256 verification hash: \${UPLOAD_URL}/\${CHECKSUM_NAME}"
+                                    curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
+                                    --upload-file "\${CHECKSUM_NAME}" \
+                                    "\${UPLOAD_URL}/\${CHECKSUM_NAME}"
+                                """
+                            }
+                        }
+                    }
+                }
+            }
+        }       
 
         stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
             when {
@@ -213,7 +247,7 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { params.PUBLISH_DOCKER_IMAGE == true }
+                    expression { params.BUILD_PUBLISH_DOCKER_IMAGE == true }
                     expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
@@ -242,52 +276,7 @@ pipeline {
                     """
                 }
             }
-        }
-
-        stage('Stage 5: Publish Raw Binary Release to Nexus') {
-            when {
-                beforeAgent true
-                allOf {
-                    expression { params.PUBLISH_RAW_RELEASE_ARTIFACTS == true }
-                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
-                }
-            }
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                    sh """
-                        set -euo pipefail
-                        RELEASE_DIR="release_dist"
-                        mkdir -p "\${RELEASE_DIR}"
-
-                        ARTIFACT_NAME="mission-control-api-${BUILD_NUMBER}-${GIT_COMMIT_SHORT}.tar.gz"
-                        CHECKSUM_NAME="\${ARTIFACT_NAME}.sha256"
-
-                        tar -czf "\${RELEASE_DIR}/\${ARTIFACT_NAME}" -C "${WORKSPACE}/publish_raw" .
-                        cd "\${RELEASE_DIR}"
-                        sha256sum "\${ARTIFACT_NAME}" > "\${CHECKSUM_NAME}"
-
-                        UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/${BUILD_NUMBER}"
-
-                        echo "--> Uploading binary package: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
-                        curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
-                          --upload-file "\${ARTIFACT_NAME}" \
-                          "\${UPLOAD_URL}/\${ARTIFACT_NAME}"
-
-                        echo "--> Uploading SHA-256 verification hash: \${UPLOAD_URL}/\${CHECKSUM_NAME}"
-                        curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
-                          --upload-file "\${CHECKSUM_NAME}" \
-                          "\${UPLOAD_URL}/\${CHECKSUM_NAME}"
-                    """
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts allowEmptyArchive: true, artifacts: 'release_dist/*.tar.gz, release_dist/*.sha256'
-                    fingerprint 'release_dist/*.tar.gz'
-                    sh "docker run --rm -v '${WORKSPACE}:/ws' alpine sh -c 'rm -rf /ws/release_dist /ws/publish_raw' || true"
-                }
-            }
-        }
+        }        
 
         stage('Stage 6: Deploy to SIL Target Node (Running as Jenkins Agent)') {
             when {
