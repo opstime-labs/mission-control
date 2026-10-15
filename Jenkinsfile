@@ -163,12 +163,14 @@ pipeline {
             }
             post {
                 always {
+                    echo "--> Post Stage2: Archiving test results and artifacts for V&V audit trail..."
                     junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'TestResults/*.trx'
                 }
                 success {
                     script {
                         // Prune tags via Nexus REST API keeping only the last 5 release tags
+                        echo "--> Post Stage2: Pruning expired Docker image tags from Nexus repository..."
                         withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                             sh '''
                                 set -euo pipefail
@@ -177,6 +179,7 @@ pipeline {
                                 KEEP_COUNT=5
 
                                 # Fetch list of component IDs sorted by version/date
+                                echo "--> Fetching component list from Nexus repository [${REPO_NAME}] for image [${IMAGE_NAME}]..."
                                 COMPONENTS_JSON=$(curl -s -u "${NEXUS_USER}:${NEXUS_PASS}" \
                                 "http://10.0.0.182:8081/service/rest/v1/components?repository=${REPO_NAME}")
 
@@ -185,6 +188,7 @@ pipeline {
                                 --arg img "${IMAGE_NAME}" \
                                 '.items[] | select(.name == $img and .version != "latest") | .id' | tail -n +$((KEEP_COUNT + 1)))
 
+                                echo "--> Identified component IDs for pruning (keeping last ${KEEP_COUNT}):"
                                 for comp_id in ${OLD_COMPONENT_IDS}; do
                                     echo "Pruning expired component ID: ${comp_id}"
                                     curl -s -X DELETE -u "${NEXUS_USER}:${NEXUS_PASS}" \
@@ -527,6 +531,7 @@ pipeline {
 
     post {
         always {
+            echo "Pipeline execution completed. Cleaning up workspace and Docker artifacts..."
             sh 'docker image prune -f || true'
             cleanWs deleteDirs: true, notFailBuild: true
         }
