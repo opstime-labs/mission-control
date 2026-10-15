@@ -166,39 +166,8 @@ pipeline {
                     echo "--> Post Stage2: Archiving test results and artifacts for V&V audit trail..."
                     junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'TestResults/*.trx'
-                }
-                success {
-                    script {
-                        withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                            sh '''
-                                set -euo pipefail
-                                REPO_NAME="docker-hosted"
-                                IMAGE_NAME="mission-control/sensor-gateway"
-                                KEEP_COUNT=5
-
-                                # Fetch component catalog
-                                COMPONENTS_JSON=$(curl -s -u "${NEXUS_USER}:${NEXUS_PASS}" \
-                                "http://10.0.0.182:8081/service/rest/v1/components?repository=${REPO_NAME}")
-
-                                # Parse IDs natively without jq
-                                OLD_IDS=$(python3 -c "
-            import json, sys
-            data = json.loads('''${COMPONENTS_JSON}''')
-            items = [i['id'] for i in data.get('items', []) if i.get('name') == '${IMAGE_NAME}' and i.get('version') != 'latest']
-            for item_id in items[${KEEP_COUNT}:]:
-                print(item_id)
-            " 2>/dev/null || true)
-
-                                for comp_id in ${OLD_IDS}; do
-                                    echo "--> Pruning expired component ID: ${comp_id}"
-                                    curl -s -X DELETE -u "${NEXUS_USER}:${NEXUS_PASS}" \
-                                    "http://10.0.0.182:8081/service/rest/v1/components/${comp_id}"
-                                done
-                            '''
-                        }
-                    }
-                } // end of success        
-            }  // end of post         
+                }                       
+            } 
         } // end of Stage 2
 
         stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
