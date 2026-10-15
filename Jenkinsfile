@@ -54,6 +54,35 @@ pipeline {
         stage('Stage 1: Configuration Audit & Traceability Gate') {
             steps {
                 script { 
+                    
+                    echo "--> Checking changed files..."
+                    def changedFiles = sh(
+                        script: 'git diff --name-only HEAD~1 HEAD || true',
+                        returnStdout: true
+                    ).trim().split('\n').findAll { it.trim() }
+
+                    // Extensions to ignore
+                    def docExtensions = ['.md', '.txt', '.pdf', '.docx', '.rst', '.adoc']
+                    
+                    // Directories to ignore entirely
+                    def docDirectories = ['docs/', 'documentation/', 'wiki/']
+
+                    // Check if any file is actual code/config (NOT documentation)
+                    boolean hasCodeChanges = changedFiles.any { filePath ->
+                        boolean isDocExtension = docExtensions.any { ext -> filePath.toLowerCase().endsWith(ext) }
+                        boolean isInDocDir     = docDirectories.any { dir -> filePath.toLowerCase().startsWith(dir) }
+                        
+                        // Return true if this file is NOT a doc
+                        return !(isDocExtension || isInDocDir)
+                    }
+
+                    if (!hasCodeChanges && changedFiles.size() > 0) {
+                        currentBuild.description = "Skipped: Documentation changes only"
+                        currentBuild.result = 'NOT_BUILT'
+                        error("Only documentation files were modified. Skipping pipeline.")
+                    }
+
+                    echo "--> Code changes detected or initial commit. Continuing pipeline..."
                     // Check PR source branch, PR title, or fallback to the last 5 commit logs
                     def prSourceBranch = env.CHANGE_BRANCH ?: ""
                     def prTitle        = env.CHANGE_TITLE ?: ""
