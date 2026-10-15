@@ -169,8 +169,6 @@ pipeline {
                 }
                 success {
                     script {
-                        // Prune tags via Nexus REST API keeping only the last 5 release tags
-                        echo "--> Post Stage2: Pruning expired Docker image tags from Nexus repository..."
                         withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                             sh '''
                                 set -euo pipefail
@@ -178,25 +176,28 @@ pipeline {
                                 IMAGE_NAME="mission-control/sensor-gateway"
                                 KEEP_COUNT=5
 
-                                # Fetch list of component IDs sorted by version/date
-                                echo "--> Fetching component list from Nexus repository [${REPO_NAME}] for image [${IMAGE_NAME}]..."
+                                # Fetch component catalog
                                 COMPONENTS_JSON=$(curl -s -u "${NEXUS_USER}:${NEXUS_PASS}" \
                                 "http://10.0.0.182:8081/service/rest/v1/components?repository=${REPO_NAME}")
 
-                                # Extract tags belonging to sensor-gateway, excluding 'latest'
-                                OLD_COMPONENT_IDS=$(echo "${COMPONENTS_JSON}" | jq -r \
-                                --arg img "${IMAGE_NAME}" \
-                                '.items[] | select(.name == $img and .version != "latest") | .id' | tail -n +$((KEEP_COUNT + 1)))
+                                # Parse IDs natively without jq
+                                OLD_IDS=$(python3 -c "
+            import json, sys
+            data = json.loads('''${COMPONENTS_JSON}''')
+            items = [i['id'] for i in data.get('items', []) if i.get('name') == '${IMAGE_NAME}' and i.get('version') != 'latest']
+            for item_id in items[${KEEP_COUNT}:]:
+                print(item_id)
+            " 2>/dev/null || true)
 
-                                echo "--> Identified component IDs for pruning (keeping last ${KEEP_COUNT}):"
-                                for comp_id in ${OLD_COMPONENT_IDS}; do
-                                    echo "Pruning expired component ID: ${comp_id}"
+                                for comp_id in ${OLD_IDS}; do
+                                    echo "--> Pruning expired component ID: ${comp_id}"
                                     curl -s -X DELETE -u "${NEXUS_USER}:${NEXUS_PASS}" \
                                     "http://10.0.0.182:8081/service/rest/v1/components/${comp_id}"
                                 done
                             '''
                         }
-                    } // end of success
+                    }
+            } // end of success
                 }
             }  // end of post         
         } // end of Stage 2
