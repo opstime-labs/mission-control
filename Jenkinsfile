@@ -171,7 +171,7 @@ pipeline {
                 }             
                 success {                    
                     script {
-                        if (params.PUBLISH_RAW_RELEASE_ARTIFACTS == true) {
+                        if (['main', 'master'].contains(env.BRANCH_NAME) && params.PUBLISH_RAW_RELEASE_ARTIFACTS) {
                             echo "--> Post Stage2: Publishing raw binary release artifacts to Nexus..."
                             withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                                 sh """
