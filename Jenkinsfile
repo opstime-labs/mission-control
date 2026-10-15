@@ -9,13 +9,16 @@ pipeline {
 
     // Jenkins UI parameters for operator-controlled gates
     parameters {
-        booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: false, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
-        booleanParam(name: 'PUBLISH_DOCKER_IMAGE', defaultValue: true, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
+        booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: true, description: 'Check to build and scan the .NET solution with SonarQube SAST and V&V test suite')
+        booleanParam(name: 'PUBLISH_DOCKER_IMAGE', defaultValue: false, description: 'Check to enable building and publishing multi-arch Docker image to Nexus')
         booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: false, description: 'Check to enable running a local Trivy vulnerability scan on the built Docker image')
         booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: false, description: 'Check to enable publishing raw binary release artifacts to Nexus')
-        booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: true, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
-        booleanParam(name: 'ROLLBACK', defaultValue: true, description: 'Check to enable rolling back to a previous deployment')
-        string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira Cloud REST API endpoint for issue comments')
+        booleanParam(name: 'DEPLOY_TO_SIL', defaultValue: false, description: 'Check to enable deploying the built Docker image to the SIL target node for integration testing')
+        booleanParam(name: 'ROLLBACK', defaultValue: false, description: 'Check to enable rolling back to a previous deployment')
+        booleanParam(name: 'RUN_SMOKE_TEST', defaultValue: false, description: 'Check to enable running smoke tests on the deployed application')
+        
+        // JIRA Cloud REST API endpoint for posting comments to issues
+        string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira Cloud REST API endpoint for issue comments')        
         string(name: 'HEALTH_CHECK_URL', defaultValue: 'http://10.0.0.163:8085/health', description: 'URL for health check endpoint')
     }
 
@@ -25,7 +28,7 @@ pipeline {
         DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
         DOTNET_NOLOGO                     = 'true'
         ContinuousIntegrationBuild        = 'true'
-        DOTNET_SDK_IMAGE                  = 'mcr.microsoft.com/dotnet/sdk:8.0-jammy'
+        DOTNET_BUILDER_IMAGE              = "${env.REGISTRY_HOST}/infrastructure/dotnet-builder:8.0.11-jdk21-sonar9.0.1-r1"        
         SONAR_HOST_URL                    = 'http://10.0.0.182:9000'
         SONAR_PROJECT_KEY                 = 'mission-control-api'
         REGISTRY_HOST                     = 'nexus.homelab.local:8082'
@@ -48,7 +51,7 @@ pipeline {
     stages {
         stage('Stage 1: Configuration Audit & Traceability Gate') {
             steps {
-                script {
+                script { 
                     // Check PR source branch, PR title, or fallback to the last 5 commit logs
                     def prSourceBranch = env.CHANGE_BRANCH ?: ""
                     def prTitle        = env.CHANGE_TITLE ?: ""
@@ -73,7 +76,7 @@ pipeline {
                     echo "Target SIL Node:    ${env.DEPLOY_SIL_AGENT_NAME} (RPi 400)"
                     echo "=========================================================="
                 }
-            }
+            }            
         }
         
         stage('Stage 2: .NET Restore, Build, Test & SonarQube SAST') {
@@ -89,8 +92,13 @@ pipeline {
                     ).trim()
                     def hostWorkspace = WORKSPACE.replace('/var/jenkins_home', jenkinsHomeHost)
 
-                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    withCredentials([
+                        string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN'),
+                        usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                         sh """
+                            echo "--> Authenticating Docker daemon to Nexus..."
+                            echo "\$NEXUS_PASS" | docker login -u "\$NEXUS_USER" --password-stdin "${REGISTRY_HOST}"
+
                             docker run --rm \
                               -v "${hostWorkspace}:/workspace" \
                               -w /workspace \
@@ -98,17 +106,13 @@ pipeline {
                               -e HOME=/tmp \
                               -e DOTNET_CLI_HOME=/tmp/.dotnet \
                               -e NUGET_PACKAGES=/tmp/.nuget/packages \
-                              -e PATH="/tmp/tools:\$PATH" \
+                              -e PATH="/usr/local/bin:/usr/bin:/bin:\$PATH" \
                               -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
                               -e ContinuousIntegrationBuild=true \
                               -e SONAR_TOKEN="${SONAR_TOKEN}" \
-                              ${DOTNET_SDK_IMAGE} \
+                              ${DOTNET_BUILDER_IMAGE} \
                               bash -c '
-                                set -euo pipefail
-
-                                echo "--> [Environment] Initializing Java runtime and SonarScanner CLI..."
-                                apt-get update -qq && apt-get install -y -qq openjdk-17-jre-headless > /dev/null
-                                dotnet tool install --tool-path /tmp/tools dotnet-sonarscanner
+                                set -euo pipefail                               
 
                                 echo "--> [CGP Audit] Restoring locked dependencies from local Nexus feed..."
                                 dotnet restore MissionControl.sln \
@@ -151,17 +155,20 @@ pipeline {
                                   /p:ContinuousIntegrationBuild=true \
                                   /p:UseAppHost=false
                               '
+                            echo "--> Cleaning up Docker daemon credentials..."
+                            docker logout "${REGISTRY_HOST}"
                         """
                     }
                 }
             }
             post {
                 always {
+                    echo "--> Post Stage2: Archiving test results and artifacts for V&V audit trail..."
                     junit allowEmptyResults: true, testResults: 'TestResults/*.trx'
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'TestResults/*.trx'
-                }
-            }
-        }
+                }                       
+            } 
+        } // end of Stage 2
 
         stage('Stage 3: Build Native Linux Image & Vulnerability Scan') {
             when {
@@ -205,7 +212,7 @@ pipeline {
                 beforeAgent true
                 allOf {
                     expression { params.PUBLISH_DOCKER_IMAGE == true }
-                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
             steps {
@@ -338,7 +345,7 @@ pipeline {
                 allOf {
                     expression { params.DEPLOY_TO_SIL == true }
                     // Enforce deployment gate: only release/main baselines deploy to physical SIL hardware
-                    //expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
             steps {
@@ -389,6 +396,14 @@ pipeline {
         } // end of Stage 6
 
         stage('Stage 7: Smoke Test & Automated Recovery') {
+            when {
+                beforeAgent true
+                allOf {
+                    expression { params.RUN_SMOKE_TEST == true }
+                    // Enforce deployment gate: only release/main baselines deploy to physical SIL hardware
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                }
+            }
             steps {
                 script {
                     try {
@@ -485,6 +500,7 @@ pipeline {
 
     post {
         always {
+            echo "Pipeline execution completed. Cleaning up workspace and Docker artifacts..."
             sh 'docker image prune -f || true'
             cleanWs deleteDirs: true, notFailBuild: true
         }
