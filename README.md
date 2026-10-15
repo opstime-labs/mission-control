@@ -1,12 +1,12 @@
-# **MissionControl: Defence-Grade CI/CD & SIL Deployment Pipeline for C\#/.NET 8**
+# **MissionControl: Defence-Grade CI/CD & SIL Deployment Pipeline for C\#/.NET 10**
 
-An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework designed for mission-critical C\#/.NET naval and sensor systems\[cite: 4, 5\]. Built to meet the operational demands of defence Systems Integration Laboratories (SIL) and tactical edge environments, this repository demonstrates reproducible builds, air-gapped artifact governance, container runtime hardening, Hardware-in-the-Loop pre-flight verification, and autonomous fault recovery\[cite: 4, 5\].
+An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework designed for mission-critical C\#/.NET naval and sensor systems\[cite: 4, 5\]. Built to meet the operational demands of defence Systems Integration Laboratories (SIL) and tactical edge environments, this repository demonstrates reproducible builds, air-gapped artifact governance, container runtime hardening, Hardware-in-the-Loop pre-flight verification, and autonomous fault recovery.
 
 ## **1\. Executive Summary & Architecture Highlights**
 
-* **Reproducible .NET 8 Compilation:** Solution-wide deterministic compilation (/p:Deterministic=true), compiler warning zero-tolerance (/p:TreatWarningsAsErrors=true), and strict SHA-512 dependency locking via packages.lock.json with dotnet restore \--locked-mode\[cite: 4, 5\].  
-* **Air-Gapped Supply Chain Governance:** Self-hosted Sonatype Nexus OSS hosting private OCI Docker registries and local NuGet feeds with Package Source Mapping enabled\[cite: 4, 5\]. Zero runtime internet dependencies\[cite: 4, 5\].  
-* **Hardened Distroless Packaging:** Multi-stage Docker builds targeting **Ubuntu Chiseled** (\[mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled\](https\://mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled)), running as an unprivileged UID (\$APP\_UID), devoid of shells, package managers, and root access\[cite: 4, 5\].  
+* **Reproducible .NET 8 Compilation:** Solution-wide deterministic compilation (/p:Deterministic=true), compiler warning zero-tolerance (/p:TreatWarningsAsErrors=true), and strict SHA-512 dependency locking via packages.lock.json with dotnet restore \--locked-mode\.  
+* **Air-Gapped Supply Chain Governance:** Self-hosted Sonatype Nexus OSS hosting private OCI Docker registries and local NuGet feeds with Package Source Mapping enabled. Zero runtime internet dependencies\[cite: 4, 5\].  
+* **Hardened Distroless Packaging:** Multi-stage Docker builds targeting **Ubuntu Chiseled** (\[mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled\](https\://mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled)), running as an unprivileged UID (\$APP\_UID), devoid of shells, package managers, and root access.  
 * **Automated Static & Dynamic Security Gates:** Jenkins pipeline gating on SonarQube quality gates (sonar.qualitygate.wait=true) and Trivy vulnerability assessments (--exit-code 1 on HIGH/CRITICAL CVEs)\[cite: 4, 5\].  
 * **Hardware-in-the-Loop (HIL) Pre-Flight Gating:** Ansible pre-flight checks validating host environmental boundaries (thermal throttling, memory/disk pressure) and kernel-level character bus bindings (/dev/i2c-1, /dev/gpiomem) before cutover\[cite: 4, 5\].  
 * **Blue/Green Zero-Downtime Deployment:** Atomic ingress routing over custom unprivileged sockets (port 8085\) using NGINX upstream reconfiguration and dynamic Docker IPAM discovery.  
