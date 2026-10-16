@@ -427,9 +427,10 @@ vault_nexus_user: !vault |
 vault_nexus_pass: !vault |  
           $ANSIBLE_VAULT;1.1;AES256  
           62386337633235313838383333363435343564613532653232313364376536343531353264666632
+```
 
 Secrets are passed strictly via --vault-password-file referencing an ephemeral, user-restricted file (chmod 600) trapped for secure shredding:
-```
+
 
 ```sh  
 shred -u -z -v -n 3 ./vault_pass_tmp
