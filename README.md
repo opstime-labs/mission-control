@@ -17,7 +17,9 @@ An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework 
 * **End-to-End Audit Traceability:** Bidirectional commit-to-issue tracking updating Jira issues via authenticated REST APIs on build, verification, rollback, or quarantine events.
 
 ## **2. System Architecture**
-<img src="docs/architecture.png" alt="System Architecture Diagram" width="800" />
+<p align="center">
+  <img src="docs/architecture/system-architecture.svg" alt="MissionControl System Architecture" width="900" />
+</p>
 
                                   
   
