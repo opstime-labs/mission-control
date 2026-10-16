@@ -60,6 +60,16 @@ pipeline {
             defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue',
             description: 'Jira Cloud REST API base endpoint for traceability updates'
         )
+        string(
+            name: 'NEXUS_RAW_HOST_URL',
+            defaultValue: 'http://10.0.0.182:8081/repository/raw-hosted',
+            description: 'Nexus raw artifacts base URL'
+        )
+        string(
+            name: 'SONAR_HOST_URL',
+            defaultValue: 'http://10.0.0.182:9000',
+            description: 'SonarQube server URL'
+        )
     }
 
     environment {
@@ -71,10 +81,8 @@ pipeline {
         
         // Infrastructure Endpoints & Images
         REGISTRY_HOST                     = 'nexus.homelab.local:8082'
-        IMAGE_NAME                        = 'mission-control/sensor-gateway'
-        NEXUS_RAW_BASE                    = 'http://10.0.0.182:8081/repository/raw-hosted'
-        DOTNET_BUILDER_IMAGE              = 'nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r1'
-        SONAR_HOST_URL                    = 'http://10.0.0.182:9000'
+        IMAGE_NAME                        = 'mission-control/sensor-gateway'        
+        DOTNET_BUILDER_IMAGE              = 'nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r1'        
         SONAR_PROJECT_KEY                 = 'mission-control-api'
         
         // Target Node & SIL Parameters
@@ -189,7 +197,7 @@ pipeline {
                                 echo "--> [SAST Begin] Initializing SonarScanner analysis hook..."
                                 dotnet-sonarscanner begin \
                                   /k:"${SONAR_PROJECT_KEY}" \
-                                  /d:sonar.host.url="${SONAR_HOST_URL}" \
+                                  /d:sonar.host.url="${params.SONAR_HOST_URL}" \
                                   /d:sonar.token="\${SONAR_TOKEN}" \
                                   /d:sonar.cs.vstest.reportsPaths="/workspace/TestResults/*.trx" \
                                   /d:sonar.qualitygate.wait=true
@@ -260,7 +268,7 @@ pipeline {
                         cd "\${RELEASE_DIR}"
                         sha256sum "\${ARTIFACT_NAME}" > "\${CHECKSUM_NAME}"
 
-                        UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/${BUILD_NUMBER}"
+                        UPLOAD_URL="${params.NEXUS_RAW_HOST_URL}/sensor-gateway/${BUILD_NUMBER}"
 
                         echo "--> Publishing binary package to Nexus raw repository: \${UPLOAD_URL}/\${ARTIFACT_NAME}..."
                         curl -s -f -u "\${NEXUS_USER}:\${NEXUS_PASS}" \
@@ -535,7 +543,7 @@ pipeline {
                 
                 if (env.CURRENT_BRANCH in ['main', 'master']) {
                     def dockerImageRef = "${env.REGISTRY_HOST}/${env.IMAGE_NAME}:${BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}"
-                    def rawTarballUrl  = "${env.NEXUS_RAW_BASE}/sensor-gateway/${BUILD_NUMBER}/mission-control-api-${BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}.tar.gz"
+                    def rawTarballUrl  = "${params.NEXUS_RAW_HOST_URL}/sensor-gateway/${BUILD_NUMBER}/mission-control-api-${BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}.tar.gz"
                     def rawShaUrl      = "${rawTarballUrl}.sha256"
 
                     def jiraCommentBody = """*CONFIGURATION AUDIT: BASELINE DEPLOYED TO SIL*
