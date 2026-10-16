@@ -9,15 +9,57 @@ pipeline {
     }
 
     parameters {
-        booleanParam(name: 'BUILD_SCAN_TEST_ENABLE', defaultValue: true, description: 'Execute .NET 10 compilation, SonarQube SAST, and TRX test suite')
-        booleanParam(name: 'RUN_IMAGE_VULN_SCAN', defaultValue: true, description: 'Enforce Trivy container vulnerability scan (Breaks on HIGH/CRITICAL)')
-        booleanParam(name: 'BUILD_PUBLISH_DOCKER_IMAGE', defaultValue: true, description: 'Publish multi-arch (amd64/arm64) Chiseled OCI image to Nexus')
-        booleanParam(name: 'PUBLISH_RAW_RELEASE_ARTIFACTS', defaultValue: true, description: 'Publish verified binary tarball and SHA-256 to Nexus raw repository')
-        choice(name: 'DEPLOYMENT_STRATEGY', choices: ['ANSIBLE', 'STANDALONE_SSH', 'SKIP'], description: 'Select controlled deployment method to SIL target hardware')
-        booleanParam(name: 'RUN_SMOKE_TEST', defaultValue: true, description: 'Execute external ingress health checks & automated rollback ladder')
-        
-        string(name: 'HEALTH_CHECK_URL', defaultValue: 'http://10.0.0.163:8085/health', description: 'Authoritative ingress endpoint on target SIL node')
-        string(name: 'JIRA_ISSUE_API_ENDPOINT', defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue', description: 'Jira Cloud REST API root endpoint')
+        // Stage 2: Code Quality & SAST Gate
+        booleanParam(
+            name: 'ENABLE_BUILD_AND_TEST',
+            defaultValue: true,
+            description: 'Compile .NET solution, execute TRX test suite, and run SonarQube SAST analysis'
+        )
+
+        // Stage 3 & Promotion Gating
+        booleanParam(
+            name: 'ENABLE_RAW_RELEASE_PUBLISH',
+            defaultValue: true,
+            description: 'Package and upload framework-dependent binary release archive (.tar.gz) to Nexus'
+        )
+
+        // Stage 4: Container Security & Registry
+        booleanParam(
+            name: 'ENABLE_TRIVY_SCAN',
+            defaultValue: true,
+            description: 'Scan candidate container with Trivy (fails pipeline on HIGH or CRITICAL findings)'
+        )
+        booleanParam(
+            name: 'ENABLE_CONTAINER_PUBLISH',
+            defaultValue: true,
+            description: 'Build and push multi-architecture (amd64/arm64) Chiseled OCI image to Nexus registry'
+        )
+       
+        // Stages 5 & 6: Deployment Execution
+        choice(
+            name: 'DEPLOY_STRATEGY',
+            choices: ['ANSIBLE', 'STANDALONE_SSH', 'SKIP'],
+            description: 'Deployment mechanism for the target SIL hardware node (sil-agent-01)'
+        )
+
+        // Stage 7: Ingress Verification
+        booleanParam(
+            name: 'ENABLE_INGRESS_HEALTH_CHECK',
+            defaultValue: true,
+            description: 'Verify service ingress health endpoints and execute automatic rollback ladder on failure'
+        )
+
+        // Target Infrastructure & Integrations
+        string(
+            name: 'HEALTH_CHECK_URL',
+            defaultValue: 'http://10.0.0.163:8085/health',
+            description: 'Authoritative health probe URL on the target SIL node'
+        )
+        string(
+            name: 'JIRA_ISSUE_API_ENDPOINT',
+            defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue',
+            description: 'Jira Cloud REST API base endpoint for traceability updates'
+        )
     }
 
     environment {
@@ -102,7 +144,7 @@ pipeline {
         stage('Stage 2: .NET 10 Restore, Build, Test & SonarQube SAST') {
             when {
                 beforeAgent true
-                expression { params.BUILD_SCAN_TEST_ENABLE == true }
+                expression { params.ENABLE_BUILD_AND_TEST == true }
             }
             steps {
                 script {
@@ -195,9 +237,11 @@ pipeline {
         stage('Stage 3: Publish Raw Binary Release Archive to Nexus') {
             when {
                 beforeAgent true
-                allOf {
-                    expression { params.PUBLISH_RAW_RELEASE_ARTIFACTS == true }
+                anyOf {                    
+                    // Automatically on main 
                     expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    // Explicit manual opt-in on feature branches/PRs
+                    expression { params.ENABLE_RAW_RELEASE_PUBLISH == true }
                 }
             }
             steps {
@@ -234,8 +278,8 @@ pipeline {
 
         stage('Stage 4: Container Security Gate & Multi-Arch Publish') {
             when {
-                beforeAgent true
-                expression { params.BUILD_PUBLISH_DOCKER_IMAGE == true }
+                beforeAgent true                
+                expression { params.ENABLE_CONTAINER_PUBLISH == true }                
             }
             steps {
                 script {
@@ -253,7 +297,7 @@ pipeline {
                               -f Dockerfile .
 
                             # 2. Enforce Trivy vulnerability scanning if enabled
-                            if [ "${params.RUN_IMAGE_VULN_SCAN}" = "true" ]; then
+                            if [ "${params.ENABLE_TRIVY_SCAN}" = "true" ]; then
                                 echo "--> [V&V Security Gate] Scanning candidate container via Trivy (--exit-code 1)..."
                                 docker run --rm \
                                   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -298,8 +342,8 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { params.DEPLOYMENT_STRATEGY == 'ANSIBLE' }
                     expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    expression { params.DEPLOY_STRATEGY == 'ANSIBLE' }                    
                 }
             }
             steps {
@@ -347,7 +391,7 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { params.DEPLOYMENT_STRATEGY == 'STANDALONE_SSH' }
+                    expression { params.DEPLOY_STRATEGY == 'STANDALONE_SSH' }
                     expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
@@ -373,8 +417,8 @@ pipeline {
             when {
                 beforeAgent true
                 allOf {
-                    expression { params.DEPLOYMENT_STRATEGY != 'SKIP' }
-                    expression { params.RUN_SMOKE_TEST == true }
+                    expression { params.DEPLOY_STRATEGY != 'SKIP' }
+                    expression { params.ENABLE_INGRESS_HEALTH_CHECK == true }
                     expression { return env.CURRENT_BRANCH in ['main', 'master'] }
                 }
             }
