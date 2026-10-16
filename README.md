@@ -342,7 +342,7 @@ trigger_local_rollback() {
 
     cat << NGINX_CONF_OUT > "${NGINX_CONF}"  
 upstream mission_control_backend {  
-    server $docke{r}_{g}w:${fallback_port} max_fails=3 fail_timeout=5s;  
+    server ${docker_gw}:${fallback_port} max_fails=3 fail_timeout=5s;  
     keepalive 32;  
 }
 
