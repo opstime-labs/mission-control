@@ -6,7 +6,7 @@ An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework 
 
 * **Reproducible .NET 10 Compilation:** Solution-wide deterministic compilation (/p:Deterministic=true), compiler warning zero-tolerance (/p:TreatWarningsAsErrors=true), and strict SHA-512 dependency locking via packages.lock.json with *dotnet restore --locked-mode*.  
 * **Air-Gapped Supply Chain Governance:** Self-hosted Sonatype Nexus OSS hosting private OCI Docker registries and local NuGet feeds with Package Source Mapping enabled. Zero runtime internet dependencies.  
-* **Hardened Distroless Packaging:** Multi-stage Docker builds targeting **Ubuntu Chiseled** ([mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled](https://mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled)), running as an unprivileged UID ($APP_UID), devoid of shells, package managers, and root access.  
+* **Hardened Distroless Packaging:** Multi-stage Docker builds targeting **Ubuntu Chiseled** ([mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled](https://mcr.microsoft.com/en-us/artifact/mar/dotnet/aspnet/tag/10.0-noble-chiseled)), running as an unprivileged UID ($APP_UID), devoid of shells, package managers, and root access.  
 * **Automated Static & Dynamic Security Gates:** Jenkins pipeline gating on SonarQube quality gates (sonar.qualitygate.wait=true) and Trivy vulnerability assessments (--exit-code 1 on HIGH/CRITICAL CVEs).  
 * **Hardware-in-the-Loop (HIL) Pre-Flight Gating:** Ansible pre-flight checks validating host environmental boundaries (thermal throttling, memory/disk pressure) and kernel-level character bus bindings (/dev/i2c-1, /dev/gpiomem) before cutover.  
 * **Blue/Green Zero-Downtime Deployment:** Atomic ingress routing over custom unprivileged sockets (port 8085) using NGINX upstream reconfiguration and dynamic Docker IPAM discovery.  
@@ -52,7 +52,7 @@ The delivery toolchain and testbed are engineered to satisfy Canadian Controlled
 | **Hardware Bus (HIL)** | **Linux Kernel Device Tree** | Broadcom I2C (`/dev/i2c-1`), `/dev/gpiomem` | Hardware-in-the-Loop character device node validation and non-root POSIX container passthrough for sensor subsystems[cite: 7, 8]. |
 | **Audit & Issue Traceability** | **Atlassian Jira REST API** | v2 REST API (Issue `DRS-12`) | Automated bidirectional telemetry logging commit SHAs, test results, build outcomes, and forensic quarantine dumps to release tickets[cite: 7, 8]. |
 
-## **4. DevSecOps & Supply Chain Governance**
+## **5. DevSecOps & Supply Chain Governance**
 
 ### **Solution-Wide Deterministic Configuration (Directory.Build.props)**
 
@@ -88,43 +88,42 @@ The delivery toolchain and testbed are engineered to satisfy Canadian Controlled
 ### **Hardened Distroless Packaging (Dockerfile)**
 
 ```dockerfile  
-# Stage 1: Build & Publish  
-FROM mcr.microsoft.com/dotnet/sdk:8.0-jammy AS build  
+# Stage 1: Build & Publish via .NET 10 SDK
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
 WORKDIR /src
 
-COPY Directory.Build.props nuget.config ./  
-COPY src/MissionControl.Api/MissionControl.Api.csproj src/MissionControl.Api/  
+COPY Directory.Build.props nuget.config ./
+COPY src/MissionControl.Api/MissionControl.Api.csproj src/MissionControl.Api/
 COPY src/MissionControl.Api/packages.lock.json src/MissionControl.Api/
 
-RUN dotnet restore src/MissionControl.Api/MissionControl.Api.csproj   
-    --configfile nuget.config   
+RUN dotnet restore src/MissionControl.Api/MissionControl.Api.csproj \
+    --configfile nuget.config \
     --locked-mode
 
-COPY src/MissionControl.Api/ src/MissionControl.Api/  
-WORKDIR /src/src/MissionControl.Api  
-RUN dotnet publish MissionControl.Api.csproj   
-    -c Release   
-    --no-restore   
-    -o /app/publish   
-    /p:ContinuousIntegrationBuild=true   
+COPY src/MissionControl.Api/ src/MissionControl.Api/
+WORKDIR /src/src/MissionControl.Api
+RUN dotnet publish MissionControl.Api.csproj \
+    -c Release \
+    --no-restore \
+    -o /app/publish \
+    /p:ContinuousIntegrationBuild=true \
     /p:UseAppHost=false
 
-# Stage 2: Distroless Hardened Runtime (Ubuntu Chiseled)  
-FROM mcr.microsoft.com/dotnet/aspnet:8.0-jammy-chiseled AS final  
+# Stage 2: Distroless Chiseled Runtime (.NET 10)
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled AS final
 WORKDIR /app
 
 USER $APP_UID
-
 COPY --from=build --chown=$APP_UID:$APP_UID /app/publish .
 
-ENV ASPNETCORE_HTTP_PORTS=8080   
-    DOTNET_EnableDiagnostics=0   
+ENV ASPNETCORE_HTTP_PORTS=8080 \
+    DOTNET_EnableDiagnostics=0 \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
 
-EXPOSE 8080  
+EXPOSE 8080
 ENTRYPOINT ["dotnet", "MissionControl.Api.dll"]
 ```
-## **5. Blue/Green Zero-Downtime Deployment Engine**
+## **6. Blue/Green Zero-Downtime Deployment Engine**
 
 ### **Dynamic Slot Topology Calculation (ansible/roles/blue_green/tasks/main.yml)**
 ```yaml  
@@ -195,7 +194,7 @@ server {
 }
 ```
 
-## **6. Hardware-in-the-Loop (HIL) Pre-Flight Gating**
+## **7. Hardware-in-the-Loop (HIL) Pre-Flight Gating**
 
 ```yaml  
 # ==============================================================================  
@@ -253,7 +252,7 @@ server {
     success_msg: "Thermal envelope nominal: {{ (host_temp_raw.stdout | trim | int / 1000) | round(1) }}°C."
 ```
 
-## **7. Autonomous Fail-Safe & Watchdog Engine**
+## **8. Autonomous Fail-Safe & Watchdog Engine**
 
 ### **Autonomous Node Watchdog (/opt/mission-control/bin/sil-watchdog.sh)**
 
@@ -416,7 +415,7 @@ while true; do
 done
 ```
 
-## **8. Configuration Control & Audit Compliance**
+## **9. Configuration Control & Audit Compliance**
 
 ### **Process-Table Secret Masking via Ansible Vault**
 
@@ -453,7 +452,7 @@ curl -s -f -X POST
   -d "{"body": "BASELINE DEPLOYMENT HALTED: Build [#${BUILD_NUMBER}] failed smoke test. SIL node placed in Fail-Safe Lock."}"   
   "${JIRA_API_ENDPOINT}/${JIRA_KEY}/comment"
 ```
-## **9. Verification & Validation Runbook**
+## **10. Verification & Validation Runbook**
 
 ### **Clean Automated Pipeline Run**
 
