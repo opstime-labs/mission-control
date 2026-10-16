@@ -1,20 +1,40 @@
-# **MissionControl: Defence-Grade CI/CD & SIL Deployment Pipeline for C#/.NET 10**
+# MissionControl: Defence-Grade CI/CD & SIL Deployment Pipeline for C#/.NET 10 / .NET 8
 
-An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework designed for mission-critical C#/.NET naval and sensor systems. Built to meet the operational demands of defence Systems Integration Laboratories (SIL) and tactical edge environments, this repository demonstrates reproducible builds, air-gapped artifact governance, container runtime hardening, Hardware-in-the-Loop pre-flight verification, and autonomous fault recovery.
+[![Pipeline Security Gate](https://img.shields.io/badge/DevSecOps-SonarQube%20%7C%20Trivy-blue)](#4-devsecops--supply-chain-governance)
+[![Runtime Target](https://img.shields.io/badge/Target-Linux%20ARM64%20%2F%20x86__64-orange)](#3-hardware-in-the-loop-hil-testbed-topology)
+[![Audit Compliance](https://img.shields.io/badge/Compliance-Controlled%20Goods%20%7C%20IEEE%20828-green)](#8-configuration-control--audit-compliance)
+[![Ingress Strategy](https://img.shields.io/badge/Ingress-NGINX%20Zero--Downtime%20Blue%2FGreen-blueviolet)](#5-bluegreen-zero-downtime-deployment-engine)
 
-## **1. Executive Summary & Architecture Highlights**
+An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework engineered for mission-critical C#/.NET naval sensor, combat management, and Electronic Warfare (EW) edge gateways. Purpose-built to satisfy the rigorous audit, configuration control (IEEE 828 / EIA-649), and security mandates of Canadian defence Systems Integration Laboratories (SIL) and tactical edge nodes, this framework demonstrates bit-for-bit reproducible builds, air-gapped supply chain governance, distroless runtime hardening, Hardware-in-the-Loop pre-flight assertions, and autonomous fault recovery.
 
-* **Reproducible .NET 10 Compilation:** Solution-wide deterministic compilation (/p:Deterministic=true), compiler warning zero-tolerance (/p:TreatWarningsAsErrors=true), and strict SHA-512 dependency locking via packages.lock.json with *dotnet restore --locked-mode*.  
-* **Air-Gapped Supply Chain Governance:** Self-hosted Sonatype Nexus OSS hosting private OCI Docker registries and local NuGet feeds with Package Source Mapping enabled. Zero runtime internet dependencies.  
-* **Hardened Distroless Packaging:** Multi-stage Docker builds targeting **Ubuntu Chiseled** ([mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled](https://mcr.microsoft.com/en-us/artifact/mar/dotnet/aspnet/tag/10.0-noble-chiseled)), running as an unprivileged UID ($APP_UID), devoid of shells, package managers, and root access.  
-* **Automated Static & Dynamic Security Gates:** Jenkins pipeline gating on SonarQube quality gates (sonar.qualitygate.wait=true) and Trivy vulnerability assessments (--exit-code 1 on HIGH/CRITICAL CVEs).  
-* **Hardware-in-the-Loop (HIL) Pre-Flight Gating:** Ansible pre-flight checks validating host environmental boundaries (thermal throttling, memory/disk pressure) and kernel-level character bus bindings (/dev/i2c-1, /dev/gpiomem) before cutover.  
-* **Blue/Green Zero-Downtime Deployment:** Atomic ingress routing over custom unprivileged sockets (port 8085) using NGINX upstream reconfiguration and dynamic Docker IPAM discovery.  
-* **Defense-in-Depth Automated Rollback Ladder:**  
-  1. *Pipeline-Level Automated Rollback:* Reverts to the standby slot if health checks or integration smoke tests fail.  
-  2. *Double-Fault Critical Stop Protocol:* Quarantines the node into an HTTP 503 Maintenance Mode with Retry-After: 300 headers and dumps kernel/process forensics if both execution slots fail.  
-  3. *Autonomous Host Supervisor (sil-watchdog.service):* Host-level systemd daemon executing out-of-band rollback if central CI connectivity drops.  
-* **End-to-End Audit Traceability:** Bidirectional commit-to-issue tracking updating Jira issues via authenticated REST APIs on build, verification, rollback, or quarantine events.
+---
+
+## 1. Executive Summary & Architecture Highlights
+
+* **Reproducible .NET SDK Compilation:** Solution-wide deterministic compilation (`/p:Deterministic=true`), compiler warning zero-tolerance (`/p:TreatWarningsAsErrors=true`), SourceLink Git commit embedding (`/p:ContinuousIntegrationBuild=true`), and strict SHA-512 dependency locking via `packages.lock.json` with `dotnet restore --locked-mode`.
+* **Air-Gapped Supply Chain Governance:** Self-hosted Sonatype Nexus OSS hosting authenticated private OCI Docker registries and local NuGet feeds with strict `<packageSourceMapping>` active. Eliminates external public package tampering and prevents runtime dependency leakage to public feeds like `nuget.org`.
+* **Hardened Distroless Packaging:** Multi-stage Docker builds targeting **Ubuntu Chiseled** (`mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled` / `8.0-jammy-chiseled`), executing unprivileged under `$APP_UID`, completely stripped of shells (`/bin/sh`), package managers (`apt`), and root escalation vectors.
+* **Automated DevSecOps Quality Gating:** Jenkins Pipeline-as-Code natively enforcing SonarQube quality gates (`sonar.qualitygate.wait=true`) for SAST/Roslyn analysis and Aquasec Trivy vulnerability scanning with hard build-breaking thresholds (`--exit-code 1` on `HIGH`/`CRITICAL` CVEs and secrets).
+* **Automated Infrastructure & Deployment via Ansible:** 
+  * *Day-0 Host Baselines (`provision_sil.yml`):* Automated systemd daemon configuration, runtime directory layouts, and out-of-band host provisioning.
+  * *Day-2 Blue/Green Application Deployment (`deploy.yml`):* Idempotent container lifecycle management, non-root hardware device bindings, dynamic Docker IPAM gateway discovery, and atomic zero-downtime reverse-proxy cutovers.
+* **Hardware-in-the-Loop (HIL) Pre-Flight Gating:** Ansible pre-flight assertions evaluating host environmental limits (thermal throttling ceilings, memory headroom, `/opt` partition thresholds) and validating physical Linux kernel character device node availability (`/dev/i2c-1`, `/dev/gpiomem`, `/dev/ttyUSB0`) prior to container staging.
+* **Blue/Green Zero-Downtime Deployment Engine:** Atomic reverse-proxy route shifts on unprivileged custom ports (`8085`) utilizing dynamic NGINX upstream template generation and graceful master reloads (`nginx -s reload`), preserving the previous slot in an idle holding state for instantaneous rollback.
+* **Multi-Tier Fault Recovery & Autonomous Survival Ladder:**
+  1. *Pipeline-Level Automated Rollback:* Immediate fallback to the standby slot upon smoke test degradation (`HTTP 502/504/404`), marking builds as `UNSTABLE` while preserving node operations.
+  2. *Double-Fault Critical Stop Protocol (`fail_safe.yml`):* Quarantines target hardware into an isolated `HTTP 503` Maintenance Mode with `Retry-After: 300` headers and automatically extracts kernel logs (`dmesg`), container stdouts, and network sockets if both execution slots fail.
+  3. *Autonomous Host Supervisor (`sil-watchdog.service`):* Embedded host-level systemd daemon continuously monitoring ingress sockets out-of-band, executing local rollbacks or quarantine freezes if central CI network connectivity is lost.
+* **Configuration Audit & Traceability Gate:** 
+  * Strict Git commit message format enforcement requiring valid Jira issue keys (e.g., `XXX-12: <type>(<scope>): <summary>`).
+  * Jenkins pipeline validation validating that incoming branch names, commit headers, and change sets correlate to verified Jira tracking records before compilation.
+* **GitHub Repository Governance & Branch Protection:** 
+  * Direct commits to `main` strictly prohibited via branch protection rules.
+  * Enforced Peer Review Pull Request workflows requiring branch up-to-date checks, linear commit histories, and mandatory signed commits.
+  * Webhook-driven Jenkins commit status integration (`Pending`, `Success`, `Failure`) gating PR merges directly on successful CI test and security passes.
+* **Jira Integration & Bidirectional Lifecycle Automation:** 
+  * Automated REST API integration updating Jira issue records (`DRS-12`) with console build URLs, commit SHAs, test summary TRX evidence, and OCI image digest coordinates.
+  * Webhook and API automation linking GitHub Pull Request lifecycle changes (opened, reviewed, merged) directly into Jira release workflow states.
+* **End-to-End Closed-Loop Audit Traceability:** Immutable bidirectional traceability bridging Jira requirements, Git commit SHAs, Jenkins pipeline executions, SonarQube quality gates, Nexus artifact digests, and SIL hardware cutover events—guaranteeing complete verification evidence for defence audits, release readiness reviews (RRR), and Controlled Goods inspections.
 
 ## **2. System Architecture**
 <p align="center">
@@ -28,8 +48,8 @@ An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework 
 
 | Node Identifier | Hardware & OS | Operational Role | Key Software Components |
 | :---- | :---- | :---- | :---- |
-| **homelab-dev** | Lenovo ThinkPad (WSL2 Ubuntu 24.04) | Workstation & Out-of-Band Admin | Git, VS Code, Ansible Core, SSH |
-| **homelab-node1** | Mini PC (AMD Ryzen 7, 32GB RAM, Ubuntu) | CI Controller & Registry Store | Jenkins (DooD), Sonatype Nexus OSS, Docker Engine |
+| **homelab-dev** | Lenovo ThinkPad (WSL2 Ubuntu 24.04) | Workstation & Out-of-Band Admin | .Net SDK 10, Git, VS Code, Ansible Core, SSH |
+| **homelab-node1** | Mini PC (AMD Ryzen 7, 32GB RAM, Ubuntu) | CI Controller & Registry Store | Jenkins (DooD), Sonatype Nexus OSS, Docker Engine, SonarQube Scanner |
 | **sil-agent-01** | Raspberry Pi 400 (4GB RAM, Broadcom ARM64) | SIL Edge Integration Target | Docker Engine, NGINX 1.27, Broadcom I2C bus |
 | **sil-isolated** | Raspberry Pi 3B (1GB RAM, Debian) | Air-Gap Staging Simulation | Local boundary validation, transfer simulation |
 
