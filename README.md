@@ -163,8 +163,7 @@ ENTRYPOINT ["dotnet", "MissionControl.Api.dll"]
 
 ```Nginx  
 upstream mission_control_backend {  
-    server {{ docker_gw_ip }}:{{ target_port }} max_fails=3 fail_timeout=5s;  
-    keepalive 32;  
+    server ${docker_gw}:${fallback_port} max_fails=3 fail_timeout=5s;
 }
 
 server {  
@@ -432,7 +431,7 @@ vault_nexus_pass: !vault |
 Secrets are passed strictly via --vault-password-file referencing an ephemeral, user-restricted file (chmod 600) trapped for secure shredding:
 ```
 
-```Bash  
+```sh  
 shred -u -z -v -n 3 ./vault_pass_tmp
 ```
 
@@ -484,7 +483,7 @@ docker stop mc-blue
 # 3. Watchdog or Pipeline catches double failure, runs fail_safe.yml,  
 # deploys 503 Maintenance Ingress, and logs dumps to /opt/mission-control/triage/.
 ```
-## **10. Engineering Standards & Methodologies**
+## **11. Engineering Standards & Methodologies**
 
 * **Configuration Management:** IEEE 828-2012 / EIA-649 Standards for Configuration Baselines.  
 * **Static Code Analysis:** SonarQube Clean Architecture / Roslyn Code Analysis Rules (CA1861, CA1852).  
