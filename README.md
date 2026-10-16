@@ -158,10 +158,10 @@ ENTRYPOINT ["dotnet", "MissionControl.Api.dll"]
 - name: Assign dynamic Docker gateway IP  
   ansible.builtin.set_fact:  
     docker_gw_ip: "{{ docker_bridge_info.network.IPAM.Config[0].Gateway }}"
-
+```
 ### **Ingress Upstream Template (gateway.conf.j2)**
 
-Nginx  
+```Nginx  
 upstream mission_control_backend {  
     server {{ docker_gw_ip }}:{{ target_port }} max_fails=3 fail_timeout=5s;  
     keepalive 32;  
