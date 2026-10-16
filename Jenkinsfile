@@ -79,6 +79,11 @@ pipeline {
             defaultValue: 'https://cp4learning.atlassian.net/rest/api/2/issue',
             description: 'Jira Cloud REST API base endpoint for bidirectional traceability updates'
         )
+        string(
+            name: 'HEALTH_CHECK_ENDPOINT',
+            defaultValue: "/health",
+            description: 'Health check endpoint path for ingress verification (e.g., /health or /api/health)'
+        )
     }
 
     environment {
@@ -109,7 +114,7 @@ pipeline {
         DEPLOY_HOST_USER                  = 'deployer'
         DEPLOY_HOST_IP                    = "${params.DEPLOY_TARGET_HOST ?: '10.0.0.163'}"
         DEPLOY_HOST_SSH                   = "${env.DEPLOY_HOST_USER}@${env.DEPLOY_HOST_IP}"
-        HEALTH_CHECK_URL                  = "http://${env.DEPLOY_HOST_IP}:${params.INGRESS_PORT ?: '8085'}/health"
+        HEALTH_CHECK_URL                  = "http://${env.DEPLOY_HOST_IP}:${params.INGRESS_PORT ?: '8085'}${params.HEALTH_CHECK_ENDPOINT ?: '/health'}"
         LOCAL_SCAN_TAG                    = "mission-control/sensor-gateway:scan-${BUILD_NUMBER}"
     }
 
