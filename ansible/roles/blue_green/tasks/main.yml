@@ -189,14 +189,14 @@
   become: no
 
 # ==============================================================================
-# PHASE 4: STATE RETENTION & STANDBY ISOLATION
+# PHASE 4: STATE RETENTION & SUPERVISOR ACTIVATION
 # ==============================================================================
 - name: Persist new active deployment slot to disk
   ansible.builtin.copy:
-    content: "{{ target_slot }}"
+    content: "{{ target_slot }}\n"
     dest: "{{ app_base_dir }}/active_slot"
-    owner: deployer
-    group: deployer
+    owner: "{{ deploy_user | default('deployer') }}"
+    group: "{{ deploy_group | default('deployer') }}"
     mode: '0644'
   become: no
 
@@ -212,3 +212,9 @@
     state: stopped
   when: not is_quarantined and prev_container_info.exists
   become: no
+
+- name: Engage local node autonomous watchdog supervisor
+  ansible.builtin.systemd:
+    name: sil-watchdog.service
+    state: started
+  become: yes
