@@ -1,24 +1,168 @@
 ---
-- name: Ensure mission-control binary directory exists
+# ==============================================================================
+# DAY-0 HARDWARE-IN-THE-LOOP & SIL BASELINE COMMISSIONING
+# Target: Raspberry Pi 400 (Debian ARM64 SIL Target Node)
+# Governance: Controlled Goods Program (CGP) & IEEE 828 Configuration Management
+# Command line example: Initial Day-0 bootstrap run (authenticating via initial admin user to create 'deployer')
+#  ansible-playbook -i ansible/inventory.ini ansible/provision_sil.yml \
+#  -u pi \
+#  --ask-pass \
+#  --ask-become-pass \
+#  -e "deploy_ssh_pub_key=~/.ssh/id_ed25519.pub"
+# Command line example: Day-2 verification run using the newly created deployer account
+# ansible-playbook -i ansible/inventory.ini ansible/provision_sil.yml \
+#  --private-key ~/.ssh/id_ed25519 \
+#  -u deployer
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. USER CREATION, SECURITY HARDENING & SSH KEY AUTHORIZATION
+# ------------------------------------------------------------------------------
+- name: Ensure required hardware bus and container groups exist on host
+  ansible.builtin.group:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - docker
+    - i2c
+    - gpio
+    - dialout
+  become: yes
+
+- name: Create dedicated unprivileged deployer service account
+  ansible.builtin.user:
+    name: "{{ deploy_user | default('deployer') }}"
+    group: "{{ deploy_group | default('deployer') }}"
+    groups:
+      - docker
+      - i2c
+      - gpio
+      - dialout
+    append: yes
+    shell: /bin/bash
+    home: "/home/{{ deploy_user | default('deployer') }}"
+    create_home: yes
+    state: present
+  become: yes
+
+- name: Authorize deployment SSH public key for deployer account
+  ansible.posix.authorized_key:
+    user: "{{ deploy_user | default('deployer') }}"
+    state: present
+    key: "{{ lookup('file', deploy_ssh_pub_key | default('~/.ssh/id_ed25519.pub')) }}"
+    exclusive: no
+  become: yes
+
+- name: Configure scoped sudoers policy for deployer (Required for Day-0 maintenance)
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/99-deployer-maintenance"
+    content: |
+      # Allow deployer service user passwordless escalation for SIL maintenance scripts
+      {{ deploy_user | default('deployer') }} ALL=(ALL) NOPASSWD: /opt/mission-control/bin/teardown-sil.sh, /usr/bin/systemctl restart sil-watchdog.service, /usr/bin/systemctl stop sil-watchdog.service, /usr/bin/systemctl start sil-watchdog.service
+    owner: root
+    group: rooty
+    mode: '0440'
+    validate: '/usr/sbin/visudo -cf %s'
+  become: yes
+
+# ------------------------------------------------------------------------------
+# 2. POSIX RUNTIME DIRECTORY HIERARCHY
+# ------------------------------------------------------------------------------
+- name: Ensure mission-control operational directory hierarchy exists
   ansible.builtin.file:
-    path: "{{ app_base_dir }}/bin"
+    path: "{{ item }}"
     state: directory
-    owner: deployer
-    group: deployer
+    owner: "{{ deploy_user | default('deployer') }}"
+    group: "{{ deploy_group | default('deployer') }}"
     mode: '0755'
+  loop:
+    - "{{ app_base_dir }}"
+    - "{{ app_base_dir }}/bin"
+    - "{{ app_base_dir }}/nginx/conf.d"
+    - "{{ app_base_dir }}/triage"
+  become: yes
+
+- name: Initialize canonical deployment active slot baseline
+  ansible.builtin.copy:
+    content: "blue\n"
+    dest: "{{ app_base_dir }}/active_slot"
+    owner: "{{ deploy_user | default('deployer') }}"
+    group: "{{ deploy_group | default('deployer') }}"
+    mode: '0644'
+    force: no
+  become: yes
+
+# ------------------------------------------------------------------------------
+# 3. HARDWARE BUS ACTIVATION (BROADCOM I2C & GPIO ENUMERATION)
+# ------------------------------------------------------------------------------
+- name: Locate boot firmware configuration file
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /boot/firmware/config.txt
+    - /boot/config.txt
+  register: rpi_config_stat
+  become: yes
+
+- name: Set active bootloader configuration file path fact
+  ansible.builtin.set_fact:
+    rpi_boot_config: "{{ (rpi_config_stat.results | selectattr('stat.exists') | map(attribute='item') | first) }}"
+
+- name: Enable Broadcom ARM I2C bus overlay in boot firmware
+  ansible.builtin.lineinfile:
+    path: "{{ rpi_boot_config }}"
+    regexp: '^#?dtparam=i2c_arm='
+    line: 'dtparam=i2c_arm=on'
+    state: present
+  register: i2c_firmware_state
+  become: yes
+
+- name: Register i2c-dev driver for persistent boot enumeration
+  ansible.builtin.lineinfile:
+    path: /etc/modules
+    line: 'i2c-dev'
+    state: present
+  become: yes
+
+- name: Load i2c-dev kernel module into running kernel
+  community.general.modprobe:
+    name: i2c-dev
+    state: present
+  become: yes
+
+- name: Apply dynamic device tree overlay live (instant HIL unblock)
+  ansible.builtin.command: dtoverlay i2c1
+  register: dtoverlay_exec
+  failed_when: false
+  changed_when: dtoverlay_exec.rc == 0
+  become: yes
+
+# ------------------------------------------------------------------------------
+# 4. DEPLOY TARGET SCRIPTS (TEARDOWN SANITIZER & LOCAL WATCHDOG)
+# ------------------------------------------------------------------------------
+- name: Deploy versioned host teardown and sanitization script
+  ansible.builtin.copy:
+    src: teardown-sil.sh
+    dest: "{{ app_base_dir }}/bin/teardown-sil.sh"
+    owner: root
+    group: "{{ deploy_group | default('deployer') }}"
+    mode: '0750'
   become: yes
 
 - name: Deploy versioned sil-watchdog script
   ansible.builtin.copy:
-    src: files/sil-watchdog.sh
+    src: sil-watchdog.sh
     dest: "{{ app_base_dir }}/bin/sil-watchdog.sh"
-    owner: deployer
-    group: deployer
+    owner: "{{ deploy_user | default('deployer') }}"
+    group: "{{ deploy_group | default('deployer') }}"
     mode: '0750'
   notify: Restart sil-watchdog service
   become: yes
 
-- name: Deploy sil-watchdog systemd unit configuration
+# ------------------------------------------------------------------------------
+# 5. SYSTEMD SUPERVISOR REGISTRATION (OPTION A: DORMANT AT DAY-0)
+# ------------------------------------------------------------------------------
+- name: Deploy sil-watchdog systemd unit descriptor
   ansible.builtin.template:
     src: sil-watchdog.service.j2
     dest: /etc/systemd/system/sil-watchdog.service
@@ -27,12 +171,11 @@
     mode: '0644'
   notify:
     - Reload systemd daemon
-    - Restart sil-watchdog service
   become: yes
 
-- name: Ensure sil-watchdog daemon is enabled and running
+- name: Enable sil-watchdog daemon at boot but hold in stopped state until app deployment
   ansible.builtin.systemd:
     name: sil-watchdog.service
     enabled: yes
-    state: started
+    state: stopped
   become: yes

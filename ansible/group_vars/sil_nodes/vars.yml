@@ -1,3 +1,9 @@
 ---
 nexus_user: "{{ vault_nexus_user }}"
 nexus_pass: "{{ vault_nexus_pass }}"
+
+# ansible/group_vars/sil_nodes/vars.yml
+deploy_user: "deployer"
+deploy_group: "deployer"
+app_base_dir: "/opt/mission-control"
+ingress_port: 8085

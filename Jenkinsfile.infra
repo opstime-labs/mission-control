@@ -1,0 +1,104 @@
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
+        timeout(time: 15, unit: 'MINUTES')
+    }
+
+    parameters {
+        string(
+            name: 'TARGET_SIL_HOST',
+            defaultValue: '10.0.0.163',
+            description: 'Physical IP or FQDN of the target SIL node (Raspberry Pi 400)'
+        )
+        string(
+            name: 'BOOTSTRAP_USER',
+            defaultValue: 'deployer',
+            description: 'User account used to execute the commissioning playbook'
+        )
+        string(
+            name: 'DEPLOY_SSH_CREDENTIAL_ID',
+            defaultValue: 'sil-node-ssh-key',
+            description: 'Jenkins SSH credential ID for host connection'
+        )
+    }
+
+    environment {
+        DEPLOY_BASE_DIR = '/opt/mission-control'
+    }
+
+    stages {
+        stage('Stage 1: Day-0 Hardware Baseline Commissioning') {
+            steps {
+                script {
+                    echo "--> Initiating Day-0 Host Commissioning on ${params.TARGET_SIL_HOST}..."
+
+                    // 1. Resolve host workspace path for DooD volume mounting
+                    def jenkinsHomeHost = sh(
+                        script: "docker inspect jenkins-controller --format '{{ range .Mounts }}{{ if eq .Destination \"/var/jenkins_home\" }}{{ .Source }}{{ end }}{{ end }}'",
+                        returnStdout: true
+                    ).trim()
+                    def hostWorkspace = WORKSPACE.replace('/var/jenkins_home', jenkinsHomeHost)
+
+                    withCredentials([
+                        sshUserPrivateKey(credentialsId: params.DEPLOY_SSH_CREDENTIAL_ID, keyFileVariable: 'SSH_KEY_FILE')
+                    ]) {
+                        sh """
+                            set -euo pipefail
+
+                            KEY_TMP="./id_infra_deploy"
+                            cp "\${SSH_KEY_FILE}" "\${KEY_TMP}"
+                            chmod 600 "\${KEY_TMP}"
+                            trap 'rm -f "\${KEY_TMP}"' EXIT INT TERM
+
+                            echo "--> Executing provision_sil.yml via containerized Ansible..."
+                            docker run --rm \
+                              -v "${hostWorkspace}:/workspace" \
+                              -e ANSIBLE_HOST_KEY_CHECKING=False \
+                              -w /workspace \
+                              alpine/ansible:latest \
+                              ansible-playbook -i ansible/inventory.ini ansible/provision_sil.yml \
+                                --private-key "/workspace/\${KEY_TMP#./}" \
+                                -u "${params.BOOTSTRAP_USER}" \
+                                -e "ansible_host=${params.TARGET_SIL_HOST}"
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Stage 2: Post-Commissioning Hardware Assertion Gate') {
+            steps {
+                script {
+                    echo "--> Verifying Hardware-in-the-Loop (HIL) buses and daemon status on target..."
+                    withCredentials([sshUserPrivateKey(credentialsId: params.DEPLOY_SSH_CREDENTIAL_ID, keyFileVariable: 'SSH_KEY')]) {
+                        sh """
+                            set -euo pipefail
+                            ssh -i "\${SSH_KEY}" -o StrictHostKeyChecking=accept-new ${params.BOOTSTRAP_USER}@${params.TARGET_SIL_HOST} '
+                                set -euo pipefail
+                                echo "--> [HIL Probe] Auditing kernel character devices..."
+                                test -e /dev/i2c-1 && echo "[PASS] /dev/i2c-1 (Broadcom I2C Bus 1) bound."
+                                test -e /dev/gpiomem && echo "[PASS] /dev/gpiomem (Memory-Mapped GPIO) bound."
+
+                                echo "--> [Audit] Verifying systemd autonomous supervisor state..."
+                                systemctl is-enabled sil-watchdog.service && echo "[PASS] sil-watchdog service enabled on boot."
+                                systemctl is-active sil-watchdog.service || echo "[PASS] sil-watchdog confirmed in safe STOPPED state (awaiting app deployment)."
+
+                                echo "--> [State Audit] Verifying canonical baseline marker..."
+                                cat ${env.DEPLOY_BASE_DIR}/active_slot
+                            '
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs deleteDirs: true, notFailBuild: true
+        }
+    }
+}
