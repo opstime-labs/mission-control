@@ -8,6 +8,7 @@ pipeline {
         skipDefaultCheckout(false)
     }
 
+    // Add Config Parameters to Jenkins UI
     parameters {
         // =========================================================================
         // 1. QUALITY GATES & VERIFICATION (V&V AUDIT GATES)
