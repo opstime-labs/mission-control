@@ -63,7 +63,7 @@ pipeline {
         string(
             name: 'INGRESS_PORT',
             defaultValue: '8085',
-            description: 'Unprivileged NGINX reverse-proxy ingress listener port on target SIL node'
+            description: 'Unprivileged NGINX reverse-proxy ingress listener port on target SIL node (e.g., 8085)'
         )
         string(
             name: 'SONAR_HOST_URL',
