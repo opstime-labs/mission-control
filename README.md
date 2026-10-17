@@ -1,10 +1,11 @@
 # MissionControl: Defence-Grade CI/CD & SIL Deployment Pipeline for C# / .NET
 
-[![Pipeline Security Gate](https://img.shields.io/badge/DevSecOps-SonarQube%20%7C%20Trivy-blue)](#5-devsecops--supply-chain-governance)
-[![Build Runner](https://img.shields.io/badge/Build%20Runner-.NET%2010%20%2F%208%20%2B%20JDK%2021%20%2B%20Sonar-success)](#4-immutable-custom-build-runner-infrastructure)
+[![Pipeline Security Gate](https://img.shields.io/badge/DevSecOps-SonarQube%20%7C%20Trivy-blue)](#6-devsecops--supply-chain-governance)
+[![Build Runner](https://img.shields.io/badge/Build%20Runner-.NET%2010%20%2F%208%20%2B%20JDK%2021%20%2B%20Sonar-success)](#5-immutable-custom-build-runner-infrastructure)
 [![Runtime Target](https://img.shields.io/badge/Target-Linux%20ARM64%20%2F%20x86__64-orange)](#3-hardware-in-the-loop-hil-testbed-topology)
-[![Audit Compliance](https://img.shields.io/badge/Compliance-Controlled%20Goods%20%7C%20IEEE%20828-green)](#9-configuration-control--audit-compliance)
-[![Ingress Strategy](https://img.shields.io/badge/Ingress-NGINX%20Zero--Downtime%20Blue%2FGreen-blueviolet)](#6-bluegreen-zero-downtime-deployment-engine)
+[![Audit Compliance](https://img.shields.io/badge/Compliance-Controlled%20Goods%20%7C%20IEEE%20828-green)](#10-configuration-control--audit-compliance)
+[![Ingress Strategy](https://img.shields.io/badge/Ingress-NGINX%20Zero--Downtime%20Blue%2FGreen-blueviolet)](#7-bluegreen-zero-downtime-deployment-engine)
+[![Homelab Setup](https://img.shields.io/badge/Self--Hosted-Jenkins%20Ansible%20Docker%20Nexus%20SonarQube-blue)](#4-tech-stack--tooling-architecture)
 
 An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework engineered for mission-critical C#/.NET naval sensor, combat management, and Electronic Warfare (EW) edge gateways. Purpose-built to satisfy the rigorous audit, configuration control (IEEE 828 / EIA-649), and security mandates of Canadian defence Systems Integration Laboratories (SIL) and tactical edge nodes, this framework demonstrates bit-for-bit reproducible builds, air-gapped supply chain governance, distroless runtime hardening, Hardware-in-the-Loop pre-flight assertions, and autonomous fault recovery.
 
@@ -58,7 +59,26 @@ An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework 
 
 ---
 
-## 4. Immutable Custom Build Runner Infrastructure
+## 4. Tech Stack & Tooling Architecture
+
+| Architectural Tier | Technology / Tooling | Version / Specification | Defence & SIL Role / Justification |
+| :--- | :--- | :--- | :--- |
+| **Language & SDK Runtime** | **C# / .NET SDK** | `net10.0` / `net8.0` (LTS) | Mission gateway microservices, ASP.NET Core Kestrel web host, P/Invoke native interop bindings. |
+| **Build Engine & Compilation** | **MSBuild & .NET CLI** | Integrated SDK 10 / 8 | Deterministic compilation (`/p:Deterministic=true`), zero-compiler-warning policy (`/p:TreatWarningsAsErrors=true`), SourceLink Git metadata. |
+| **Dependency Governance** | **NuGet Package Manager** | `packages.lock.json` + `nuget.config` | Strict SHA-512 dependency hashing via `--locked-mode`; air-gapped `<packageSourceMapping>` strictly preventing public registry lookups. |
+| **Container Runtime & Base** | **Docker Engine & Buildx** | MCR Ubuntu Jammy/Noble Chiseled | Distroless, hardened non-root container images (`$APP_UID`), devoid of shells, package managers, and standard attack vectors. |
+| **Pipeline-as-Code (CI/CD)** | **Jenkins (DooD)** | 2.541+ LTS (Declarative `Jenkinsfile`) | 7-stage multibranch pipeline: locked build, SAST, CVE scan, OCI push, Ansible deployment, automated smoke test, and rollback triggers. |
+| **Artifact & Registry Hub** | **Sonatype Nexus OSS** | 3.7x (Private Hosted/Group) | Private authenticated OCI Docker v2 registry (`:8082`), internal NuGet feed (`:8081`), and raw binary tarball storage. |
+| **Static Code Analysis (SAST)** | **SonarQube Community** | 10.x Server / Scanner 9.0.1 | Quality gate enforcement (`sonar.qualitygate.wait=true`), Roslyn code analysis rules, and automated test coverage reporting. |
+| **Container CVE & Secret Scan** | **Aquasec Trivy** | v0.58+ | Automated vulnerability gate scanning candidate images for `HIGH` and `CRITICAL` CVEs before registry ingress. |
+| **Deployment Orchestration** | **Ansible Core** | 2.16+ (`community.docker`, `ansible.posix`) | Idempotent SIL cutover, Hardware-in-the-Loop pre-flight assertions, dynamic Docker IPAM gateway discovery, zero-downtime execution. |
+| **Secrets Management** | **Ansible Vault** | AES-256 (`vault.yml`) | Encryption-at-rest for registry tokens and private deployment keys; transient memory decryption eliminating process-table exposure (`ps aux`). |
+| **Edge Ingress & Reverse Proxy**| **NGINX Reverse Proxy** | 1.27 Alpine | Atomic upstream proxy cutover on unprivileged port `8085`, graceful worker reload (`nginx -s reload`), and 503 maintenance mode quarantine. |
+| **Embedded Supervisor / Watchdog**| **Systemd & Bash** | `sil-watchdog.service` | Out-of-band host supervisor daemon monitoring port 8085, executing autonomous rollback and double-fault quarantine when CI is unreachable. |
+| **Hardware Bus (HIL)** | **Linux Kernel Device Tree** | Broadcom I2C (`/dev/i2c-1`), `/dev/gpiomem` | Hardware-in-the-Loop character device node validation and non-root POSIX container passthrough for sensor subsystems. |
+| **Audit & Issue Traceability** | **Atlassian Jira REST API** | v2 REST API (Issue `DRS-12`) | Automated bidirectional telemetry logging commit SHAs, test results, build outcomes, and forensic quarantine dumps to release tickets. |
+---
+## 5. Immutable Custom Build Runner Infrastructure
 
 In air-gapped defence environments, running dynamic package downloads (`apt-get update`, `dotnet tool install`) during every CI/CD run introduces supply-chain vulnerabilities, slows build throughput, and violates Configuration Management baselines. 
 
@@ -101,7 +121,7 @@ docker push nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-so
 
 ---
 
-## 5. DevSecOps & Supply Chain Governance
+## 6. DevSecOps & Supply Chain Governance
 
 ### 1. Solution-Wide Deterministic Configuration (`Directory.Build.props`)
 ```xml
@@ -202,7 +222,7 @@ ENTRYPOINT ["dotnet", "MissionControl.Api.dll"]
 
 ---
 
-## 6. Blue/Green Zero-Downtime Deployment Engine
+## 7. Blue/Green Zero-Downtime Deployment Engine
 
 ### Dynamic Slot Topology Calculation (`ansible/roles/blue_green/tasks/main.yml`)
 ```yaml
@@ -275,7 +295,7 @@ server {
 
 ---
 
-## 7. Hardware-in-the-Loop (HIL) Pre-Flight Gating
+## 8. Hardware-in-the-Loop (HIL) Pre-Flight Gating
 
 ```yaml
 # ==============================================================================
@@ -335,7 +355,7 @@ server {
 
 ---
 
-## 8. Autonomous Fail-Safe & Watchdog Engine
+## 9. Autonomous Fail-Safe & Watchdog Engine
 
 ### Autonomous Node Watchdog (`/opt/mission-control/bin/sil-watchdog.sh`)
 ```bash
@@ -499,7 +519,7 @@ done
 
 ---
 
-## 9. Configuration Control & Audit Compliance
+## 10. Configuration Control & Audit Compliance
 
 ### 1. Process-Table Secret Masking via Ansible Vault
 To prevent secrets from leaking into `/proc/<pid>/cmdline` or `ps aux`, secrets are committed encrypted via AES-256 in `ansible/group_vars/sil_nodes/vault.yml`:
@@ -534,26 +554,7 @@ curl -s -f -X POST \
   "${JIRA_API_ENDPOINT}/${JIRA_KEY}/comment"
 ```
 
----
 
-## 10. Tech Stack & Tooling Architecture
-
-| Architectural Tier | Technology / Tooling | Version / Specification | Defence & SIL Role / Justification |
-| :--- | :--- | :--- | :--- |
-| **Language & SDK Runtime** | **C# / .NET SDK** | `net10.0` / `net8.0` (LTS) | Mission gateway microservices, ASP.NET Core Kestrel web host, P/Invoke native interop bindings. |
-| **Build Engine & Compilation** | **MSBuild & .NET CLI** | Integrated SDK 10 / 8 | Deterministic compilation (`/p:Deterministic=true`), zero-compiler-warning policy (`/p:TreatWarningsAsErrors=true`), SourceLink Git metadata. |
-| **Dependency Governance** | **NuGet Package Manager** | `packages.lock.json` + `nuget.config` | Strict SHA-512 dependency hashing via `--locked-mode`; air-gapped `<packageSourceMapping>` strictly preventing public registry lookups. |
-| **Container Runtime & Base** | **Docker Engine & Buildx** | MCR Ubuntu Jammy/Noble Chiseled | Distroless, hardened non-root container images (`$APP_UID`), devoid of shells, package managers, and standard attack vectors. |
-| **Pipeline-as-Code (CI/CD)** | **Jenkins (DooD)** | 2.541+ LTS (Declarative `Jenkinsfile`) | 7-stage multibranch pipeline: locked build, SAST, CVE scan, OCI push, Ansible deployment, automated smoke test, and rollback triggers. |
-| **Artifact & Registry Hub** | **Sonatype Nexus OSS** | 3.7x (Private Hosted/Group) | Private authenticated OCI Docker v2 registry (`:8082`), internal NuGet feed (`:8081`), and raw binary tarball storage. |
-| **Static Code Analysis (SAST)** | **SonarQube Community** | 10.x Server / Scanner 9.0.1 | Quality gate enforcement (`sonar.qualitygate.wait=true`), Roslyn code analysis rules, and automated test coverage reporting. |
-| **Container CVE & Secret Scan** | **Aquasec Trivy** | v0.58+ | Automated vulnerability gate scanning candidate images for `HIGH` and `CRITICAL` CVEs before registry ingress. |
-| **Deployment Orchestration** | **Ansible Core** | 2.16+ (`community.docker`, `ansible.posix`) | Idempotent SIL cutover, Hardware-in-the-Loop pre-flight assertions, dynamic Docker IPAM gateway discovery, zero-downtime execution. |
-| **Secrets Management** | **Ansible Vault** | AES-256 (`vault.yml`) | Encryption-at-rest for registry tokens and private deployment keys; transient memory decryption eliminating process-table exposure (`ps aux`). |
-| **Edge Ingress & Reverse Proxy**| **NGINX Reverse Proxy** | 1.27 Alpine | Atomic upstream proxy cutover on unprivileged port `8085`, graceful worker reload (`nginx -s reload`), and 503 maintenance mode quarantine. |
-| **Embedded Supervisor / Watchdog**| **Systemd & Bash** | `sil-watchdog.service` | Out-of-band host supervisor daemon monitoring port 8085, executing autonomous rollback and double-fault quarantine when CI is unreachable. |
-| **Hardware Bus (HIL)** | **Linux Kernel Device Tree** | Broadcom I2C (`/dev/i2c-1`), `/dev/gpiomem` | Hardware-in-the-Loop character device node validation and non-root POSIX container passthrough for sensor subsystems. |
-| **Audit & Issue Traceability** | **Atlassian Jira REST API** | v2 REST API (Issue `DRS-12`) | Automated bidirectional telemetry logging commit SHAs, test results, build outcomes, and forensic quarantine dumps to release tickets. |
 
 ---
 
