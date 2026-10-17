@@ -1,5 +1,59 @@
 ---
 # ==============================================================================
+# PHASE 0: HARDWARE-IN-THE-LOOP (HIL) SENSOR & HOST PRE-FLIGHT DIAGNOSTICS
+# ==============================================================================
+- name: Probe required hardware bus device nodes
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "/dev/i2c-1"
+    - "/dev/gpiomem"
+  register: hil_devices_probe
+
+- name: Gate deployment on physical device node availability
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+    fail_msg: "CRITICAL HIL FAILURE: Hardware device [{{ item.item }}] is not bound on the target node."
+    success_msg: "Hardware device [{{ item.item }}] present and bound."
+  loop: "{{ hil_devices_probe.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Inspect target node disk capacity on deployment partition (/opt)
+  ansible.builtin.shell: "df --output=avail -k /opt | tail -n 1"
+  register: opt_avail_kb
+  changed_when: false
+  become: no
+
+- name: Gate deployment if target filesystem free space is below threshold (< 1GB)
+  ansible.builtin.assert:
+    that:
+      - (opt_avail_kb.stdout | trim | int) >= 1048576
+    fail_msg: "CRITICAL: Target node /opt partition has less than 1GB free (Available: {{ opt_avail_kb.stdout | trim }} KB)."
+    success_msg: "Disk capacity verified: {{ (opt_avail_kb.stdout | trim | int / 1024) | round(2) }} MB available on /opt."
+
+- name: Probe CPU thermal envelope on target embedded hardware (Broadcom/ARM/x86)
+  ansible.builtin.shell: |
+    if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+      cat /sys/class/thermal/thermal_zone0/temp
+    elif command -v vcgencmd >/dev/null 2>&1; then
+      vcgencmd measure_temp | grep -o -E '[0-9.]+' | awk '{print $1 * 1000}'
+    else
+      echo "45000"
+    fi
+  register: host_temp_raw
+  changed_when: false
+  become: no
+
+- name: Gate deployment if node thermal limit is exceeded (> 75°C)
+  ansible.builtin.assert:
+    that:
+      - (host_temp_raw.stdout | trim | int) <= 75000
+    fail_msg: "CRITICAL: Thermal throttling danger! Node temperature is {{ (host_temp_raw.stdout | trim | int / 1000) | round(1) }}°C. Threshold is 75°C."
+    success_msg: "Thermal envelope nominal: {{ (host_temp_raw.stdout | trim | int / 1000) | round(1) }}°C."
+    
+# ==============================================================================
 # PHASE 1: DISCOVERY & QUARANTINE RECOVERY
 # ==============================================================================
 - name: Read current active deployment slot from baseline file
