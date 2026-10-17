@@ -89,16 +89,17 @@ sudo chmod -R 770 /opt/sonarqube
 sudo chmod -R 775 /var/jenkins_home
 ```
 ## 4. Control Plane Deployment Execution
-Place the verified docker-compose.yml into /opt/infra-control-plane/docker-compose.yml:
+Copy the MissionControl/infra/control-plane/docker-compose.yml into /opt/infra-control-plane/docker-compose.yml:
+
 
 ```Bash
 cd /opt/infra-control-plane
 
 # Launch the entire control plane stack in detached mode
 docker compose up -d
-Verification & Health State Audit
-Verify that all four containers initialize and pass their respective health probes:
 ```
+### Verification & Health State Audit
+Verify that all four containers initialize and pass their respective health probes:
 
 ```Bash
 docker compose ps
@@ -111,6 +112,7 @@ nexus-controller    sonatype/nexus3:3.70.1    "/opt/sonatype/nexus…"   nexus  
 sonarqube-db        postgres:15-alpine        "docker-entrypoint.s…"   sonar-db     2 minutes ago   Up 2 minutes (healthy)   5432/tcp
 sonarqube-server    sonarqube:10.6-community  "/opt/sonarqube/bin/…"   sonarqube    2 minutes ago   Up 2 minutes (healthy)   0.0.0.0:9000->9000/tcp
 ```
+
 ## 5. First-Boot System Configuration & Baseline Setup
 ### 1. Sonatype Nexus OSS Baseline (Port 8081)
 #### Step 1: Retrieve initial admin password:
