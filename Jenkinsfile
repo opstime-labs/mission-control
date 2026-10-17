@@ -8,6 +8,7 @@ pipeline {
         skipDefaultCheckout(false)
     }
 
+    // Jenkins UI parameters for quality gates, artifact promotion, and controlled SIL deployment strategy
     parameters {
         // =========================================================================
         // 1. QUALITY GATES & VERIFICATION (V&V AUDIT GATES)
