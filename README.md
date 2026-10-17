@@ -43,7 +43,7 @@ An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework 
 
 ## 2. System Architecture
 <p align="center">
-  <img src="docs/architecture/system-architecture.svg" alt="MissionControl System Architecture" width="900" />
+  <img src="docs/assets/system-architecture.svg" alt="MissionControl System Architecture" width="900" />
 </p>
 
 ---
@@ -591,7 +591,6 @@ docker stop mc-blue
 ```
 
 ---
----
 ## 12. Systems Integration Lab (SIL) Hardware Troubleshooting & RCA Matrix
 
 During the commissioning and verification of the physical testbed (Lenovo ThinkPad WSL2 workstation, Ubuntu Mini PC CI controller, and Raspberry Pi 400 ARM64 SIL target node), several low-level kernel, networking, and supply-chain anomalies were diagnosed and resolved. The matrix below documents the root cause analysis (RCA) and automated engineering mitigations applied under IEEE 828 configuration control.
@@ -608,7 +607,16 @@ During the commissioning and verification of the physical testbed (Lenovo ThinkP
 | **Process-Table Security** | Sensitive registry and Jira tokens potentially visible via `ps aux` and `/proc/<pid>/cmdline`. | Command-line CLI flags (`-e nexus_pass=...` and `curl -u user:token`) leak plaintext arguments to host process tables in multi-tenant environments. | Migrated secrets to AES-256 encrypted Ansible Vault files and ephemeral `curl -K` configuration files securely shredded (`shred -u -z`) upon task completion. | Jenkins credential file bindings passed strictly via `--vault-password-file` and memory buffers, satisfying CGP cyber postures. |
 ---
 
-## 13. Engineering Standards & Methodologies
+## 13. CI/CD Control Plane Provisioning (Infrastructure-as-Code)
+
+The core delivery toolchain (Jenkins DooD, Sonatype Nexus OSS, and SonarQube) running on the Mini PC controller is fully containerized and provisioned deterministically via Docker Compose and systemd host units.
+
+* **Repository Data & State Isolation:** Persistent state mapped to isolated NVMe mount paths (`/opt/nexus-data`, `/var/jenkins_home`, `/opt/sonarqube/data`).
+* **Daemon Interop:** Jenkins executes via mounted `/var/run/docker.sock` to spin up ephemeral `.NET` compilation runners and Ansible deployment containers without polluting the host OS.
+* **Deterministic Deployment Runbook:** For exact compose manifests, reverse-proxy network bindings, and systemd service descriptors, inspect [`docs/infra-provisioning.md`](docs/infra-provisioning.md).
+
+---
+## 14. Engineering Standards & Methodologies
 
 * **Configuration Management:** IEEE 828-2012 / EIA-649 Standards for Configuration Baselines.
 * **Static Code Analysis:** SonarQube Clean Architecture / Roslyn Code Analysis Rules (`CA1861`, `CA1852`).
