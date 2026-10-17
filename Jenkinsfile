@@ -436,7 +436,7 @@ pipeline {
                         set -euo pipefail
                         echo "--> Synchronizing deployment scripts to standalone SIL hardware..."
                         ssh -o StrictHostKeyChecking=accept-new ${env.DEPLOY_HOST_SSH} "mkdir -p /tmp/mission-control"
-                        scp -o StrictHostKeyChecking=accept-new deploy/scripts/deploy.sh ${env.DEPLOY_HOST_SSH}:/tmp/mission-control/deploy.sh
+                        scp -o StrictHostKeyChecking=accept-new infra/scripts/deploy.sh ${env.DEPLOY_HOST_SSH}:/tmp/mission-control/deploy.sh
                        
                         echo "--> Executing cutover for baseline ${env.TARGET_RELEASE_TAG}..."
                         ssh ${env.DEPLOY_HOST_SSH} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${env.TARGET_RELEASE_TAG}"
