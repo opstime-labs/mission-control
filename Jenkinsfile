@@ -85,6 +85,11 @@ pipeline {
             defaultValue: "/health",
             description: 'Health check endpoint path for ingress verification (e.g., /health or /api/health)'
         )
+        string(
+            name: 'PROMOTION_TIMEOUT_MINUTES',
+            defaultValue: '60',
+            description: 'V&V Approval timeout window in minutes (Homelab testing: use 2; Formal Release: use 60-120)'
+        )
     }
 
     environment {
@@ -369,6 +374,52 @@ pipeline {
             post {
                 always {
                     sh 'docker rmi "${LOCAL_SCAN_TAG}" 2>/dev/null || true'
+                }
+            }
+        }
+
+        stage('Stage 4.5: Release Readiness Review & V&V Approval Gate') {
+            when {
+                beforeAgent true
+                allOf {
+                    expression { return env.CURRENT_BRANCH in ['main', 'master'] }
+                    expression { params.DEPLOY_STRATEGY != 'SKIP' }
+                }
+            }
+            steps {
+                script {
+                    // Parse and enforce safe boundary limits (minimum 1 minute, maximum 480 minutes)
+                    def rawTimeout = params.PROMOTION_TIMEOUT_MINUTES ?: '60'
+                    int timeoutMinutes = rawTimeout.isInteger() ? rawTimeout.toInteger() : 60
+                    if (timeoutMinutes < 1) timeoutMinutes = 1
+                    if (timeoutMinutes > 480) timeoutMinutes = 480
+
+                    echo "=========================================================="
+                    echo "RELEASE READINESS REVIEW (RRR) GATE"
+                    echo "Release Baseline: ${env.TARGET_RELEASE_TAG}"
+                    echo "Target Hardware:  ${env.DEPLOY_HOST_IP} (SIL Node)"
+                    echo "Active Timeout:   ${timeoutMinutes} minute(s)"
+                    echo "=========================================================="
+
+                    timeout(time: timeoutMinutes, unit: 'MINUTES') {
+                        input(
+                            id: 'ProceedWithSILCutover',
+                            message: "Authorize Blue/Green cutover for baseline ${env.TARGET_RELEASE_TAG} to SIL hardware (${env.DEPLOY_HOST_IP})?",
+                            ok: 'Authorize & Deploy',
+                            parameters: [
+                                choice(
+                                    name: 'AUTHORIZED_TARGET_SLOT',
+                                    choices: ['AUTO', 'FORCE_BLUE', 'FORCE_GREEN'],
+                                    description: 'Override slot destination or allow Ansible dynamic toggle'
+                                ),
+                                string(
+                                    name: 'APPROVAL_JUSTIFICATION',
+                                    defaultValue: 'V&V Scheduled Test Window',
+                                    description: 'Engineering justification recorded in Jira audit trail'
+                                )
+                            ]
+                        )
+                    }
                 }
             }
         }
