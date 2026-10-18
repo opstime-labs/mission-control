@@ -33,6 +33,9 @@
 
     <!-- Suppress HTTP warning strictly for internal lab Nexus proxy           -->
     <NoWarn>$(NoWarn);NU1803</NoWarn>
+    
+    <!-- Suppress CA2007 in ASP.NET Core web targets -->
+    <NoWarn>$(NoWarn);CA2007</NoWarn>
 
     <!-- ===================================================================== -->
     <!-- 4. AIR-GAPPED IMMUTABILITY & DETERMINISTIC RESTORES                   -->
