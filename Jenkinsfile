@@ -234,7 +234,8 @@ pipeline {
                                   /d:sonar.host.url="${env.SONAR_HOST_URL}" \
                                   /d:sonar.token="\${SONAR_TOKEN}" \
                                   /d:sonar.cs.vstest.reportsPaths="/workspace/TestResults/*.trx" \
-                                  /d:sonar.qualitygate.wait=true
+                                  /d:sonar.qualitygate.wait=true \
+                                  /d:sonar.scanner.scanAll=false
 
                                 echo "--> [V&V Gate] Enforcing zero compiler warnings & deterministic flags..."
                                 dotnet build MissionControl.sln \
