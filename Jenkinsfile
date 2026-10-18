@@ -395,12 +395,35 @@ pipeline {
                     if (timeoutMinutes > 480) timeoutMinutes = 480
 
                     echo "=========================================================="
-                    echo "RELEASE READINESS REVIEW (RRR) GATE"
-                    echo "Release Baseline: ${env.TARGET_RELEASE_TAG}"
-                    echo "Target Hardware:  ${env.DEPLOY_HOST_IP} (SIL Node)"
-                    echo "Active Timeout:   ${timeoutMinutes} minute(s)"
+                    echo "RELEASE BASELINE READY FOR CONTROLLED DELIVERY"
+                    echo "Jira Issue:         ${env.JIRA_ID}"
+                    echo "Release Tag:        ${env.TARGET_RELEASE_TAG}"
+                    echo "Image Digest:       ${env.REGISTRY_HOST}/${env.IMAGE_NAME}:${env.TARGET_RELEASE_TAG}"
+                    echo "Target Hardware:    ${env.DEPLOY_SIL_AGENT_NAME} (${env.DEPLOY_HOST_IP})"
+                    echo "Active Timeout:     ${timeoutMinutes} minute(s)"
                     echo "=========================================================="
 
+                    // Notify Jira that the artifact is verified and awaiting deployment authorization
+                    withCredentials([usernamePassword(credentialsId: 'jira-cloud-creds', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_TOKEN')]) {
+                        sh """
+                            set -euo pipefail
+                            CURL_CONF=\$(mktemp)
+                            chmod 600 "\${CURL_CONF}"
+                            trap 'rm -f "\${CURL_CONF}"' EXIT INT TERM
+                            
+                            AUTH_B64=\$(printf "%s:%s" "\${JIRA_USER}" "\${JIRA_TOKEN}" | base64 | tr -d '\\n')
+                            echo "header = \\"Authorization: Basic \${AUTH_B64}\\"" > "\${CURL_CONF}"
+
+                            curl -s -f -X POST \
+                              -K "\${CURL_CONF}" \
+                              -H "Accept: application/json" \
+                              -H "Content-Type: application/json" \
+                              -d '{"body": "📋 RELEASE READINESS GATE: Build [#${BUILD_NUMBER}|${env.BUILD_URL}] passed SonarQube SAST, unit tests, and Trivy CVE gating.\\n\\nArtifact [${env.TARGET_RELEASE_TAG}] is staged in Nexus and awaiting manual authorization to cutover to SIL Node [${env.DEPLOY_SIL_AGENT_NAME}]."}' \
+                              "${env.JIRA_API_URL}/${env.JIRA_ID}/comment" || echo "[WARNING] Jira comment failed."
+                        """
+                    }
+
+                    // Operator / V&V Approval Prompt with Automatic Timeout
                     timeout(time: timeoutMinutes, unit: 'MINUTES') {
                         input(
                             id: 'ProceedWithSILCutover',
@@ -415,14 +438,14 @@ pipeline {
                                 string(
                                     name: 'APPROVAL_JUSTIFICATION',
                                     defaultValue: 'V&V Scheduled Test Window',
-                                    description: 'Engineering justification recorded in Jira audit trail'
+                                    description: 'Reason for deployment authorization (recorded in Jira audit trail)'
                                 )
                             ]
                         )
                     }
                 }
             }
-        }
+        }        
 
         stage('Stage 5: Deploy to SIL Hardware Node via Ansible') {
             when {

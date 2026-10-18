@@ -78,7 +78,102 @@ An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework 
 | **Hardware Bus (HIL)** | **Linux Kernel Device Tree** | Broadcom I2C (`/dev/i2c-1`), `/dev/gpiomem` | Hardware-in-the-Loop character device node validation and non-root POSIX container passthrough for sensor subsystems. |
 | **Audit & Issue Traceability** | **Atlassian Jira REST API** | v2 REST API (Issue `DRS-12`) | Automated bidirectional telemetry logging commit SHAs, test results, build outcomes, and forensic quarantine dumps to release tickets. |
 ---
-## 5. Immutable Custom Build Runner Infrastructure
+## 5. CI/CD Delivery Pipeline Architecture (`Jenkinsfile`)
+
+The delivery pipeline enforces IEEE 828 configuration baselines and Controlled Goods data integrity across seven deterministic, containerized stages:
+
+```mermaid
+flowchart TD
+    %% -------------------------------------------------------------------------
+    %% STYLING DEFINITIONS
+    %% -------------------------------------------------------------------------
+    classDef gitClass fill:#24292e,stroke:#f05032,stroke-width:2px,color:#fff;
+    classDef buildClass fill:#1f2937,stroke:#3b82f6,stroke-width:2px,color:#fff;
+    classDef testClass fill:#1f2937,stroke:#10b981,stroke-width:2px,color:#fff;
+    classDef secClass fill:#1f2937,stroke:#8b5cf6,stroke-width:2px,color:#fff;
+    classDef gateClass fill:#312e81,stroke:#f59e0b,stroke-width:3px,color:#fff;
+    classDef deployClass fill:#064e3b,stroke:#059669,stroke-width:2px,color:#fff;
+    classDef auditClass fill:#1e293b,stroke:#0284c7,stroke-width:2px,color:#fff;
+    classDef abortClass fill:#450a0a,stroke:#ef4444,stroke-width:2px,color:#fff;
+    classDef rbacClass fill:#18181b,stroke:#71717a,stroke-width:1px,stroke-dasharray: 5 5,color:#cbd5e1;
+
+    %% -------------------------------------------------------------------------
+    %% PIPELINE NODES & FLOW
+    %% -------------------------------------------------------------------------
+    subgraph SCM ["SOURCE CONTROL & TRACEABILITY"]
+        A["Git Commit / Pull Request<br/><code>git commit -m 'DRS-12: feat...'</code>"]:::gitClass
+    end
+
+    subgraph CI ["CONTINUOUS INTEGRATION (DooD RUNNER)"]
+        B["Stage 1: Traceability & Locked Restore<br/>• Validate Jira Key <code>(DRS-XX)</code><br/>• <code>dotnet restore --locked-mode</code>"]:::buildClass
+        C["Stage 2: Deterministic Compilation & SAST<br/>• <code>/p:TreatWarningsAsErrors=true</code><br/>• SonarQube Scanner Quality Gate"]:::buildClass
+        D["Stage 3: V&V Verification & Test Matrix<br/>• <code>dotnet test --logger:trx</code><br/>• Unit & Integration Test Suite"]:::testClass
+        E["Stage 4: Container Security & Packaging<br/>• Chiseled Ubuntu Non-Root Image<br/>• Trivy CVE Gate (Fail on CRITICAL/HIGH)<br/>• Publish Digest to Private Nexus OCI"]:::secClass
+    end
+
+    subgraph CD_GATE ["CONTINUOUS DELIVERY PROMOTION GATE"]
+        F{"Stage 4.5: Release Readiness Review (RRR)<br/>• Post candidate metrics to Jira <code>DRS-12</code><br/>• Dynamic Timeout: <code>PROMOTION_TIMEOUT_MINUTES</code><br/>• Authorized Operator Input"}:::gateClass
+    end
+
+    subgraph TARGET ["SYSTEMS INTEGRATION LAB (SIL RPi 400)"]
+        G["Stage 5: Ansible Zero-Downtime Cutover<br/>• Hardware Bus Assertions (<code>/dev/i2c-1</code>, <code>/dev/gpiomem</code>)<br/>• Pull OCI Digest & Stage Target Container<br/>• Atomic NGINX Reload (Port 8085)"]:::deployClass
+        H{"Stage 7: Ingress & Health Gate<br/>Probe: <code>http://10.0.0.163:8085/health</code>"}:::deployClass
+        I["Active Slot State Synchronized<br/>Standby Slot Retained in Stopped State"]:::deployClass
+        
+        subgraph RECOVERY ["AUTOMATED RECOVERY LADDER"]
+            J["Tier 1: Single-Slot Rollback<br/>(<code>rollback.yml</code> -> Restore Prior Slot)"]:::abortClass
+            K["Tier 2: Double-Fault Circuit Breaker<br/>(<code>fail_safe.yml</code> -> 503 Quarantine Mode)"]:::abortClass
+            L["Tier 3: Autonomous Host Watchdog<br/>(<code>sil-watchdog.service</code> Daemon)"]:::abortClass
+        end
+    end
+
+    subgraph CLOSEOUT ["AUDIT & COMPLIANCE VERIFICATION"]
+        M["Post Actions: Close Audit Trail<br/>• Record Tag, SHA-256 Digest & Slot to Jira<br/>• Archive VSTest TRX & SonarQube Badges"]:::auditClass
+        N["Pipeline Aborted Cleanly<br/>• Target SIL Hardware Untouched<br/>• Image Retained in Nexus for Audit"]:::abortClass
+    end
+
+    %% CONNECTIONS
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+
+    F -->|Authorized Sign-Off| G
+    F -->|Timeout / Rejected| N
+
+    G --> H
+    H -->|Status: 200 OK| I
+    I --> M
+
+    H -->|Health Probe Failed| J
+    J -->|Rollback Slot Degraded| K
+    H -.->|Out-of-Band CI Failure| L
+
+    %% -------------------------------------------------------------------------
+    %% LIFECYCLE SEPARATION (DAY-0 VS DAY-2)
+    %% -------------------------------------------------------------------------
+    subgraph DAY0 ["DAY-0 / DAY-1 HOST COMMISSIONING (OUT-OF-BAND)"]
+        Z["<code>Jenkinsfile.infra</code> / <code>provision_sil.yml</code><br/>• Broadcom I2C & GPIO Overlay Activation<br/>• Deployer Service Account & Scoped Sudoers<br/>• Register Dormant <code>sil-watchdog.service</code>"]:::rbacClass
+    end
+    Z -.->|Pre-Conditions Established| G
+```
+
+### Pipeline Stage & Verification Matrix
+
+| Stage | Focus Area | Technical Mechanism | Exit Gate / Compliance Rule |
+| :--- | :--- | :--- | :--- |
+| **1. Traceability & Dependency Lock** | Supply Chain Security | Git log regex parsing + `dotnet restore --locked-mode` | Rejects commits lacking Jira ticket IDs; aborts on dependency drift (`NU1004`). |
+| **2. Compilation & SAST** | Code Quality & Hardening | `dotnet build /p:TreatWarningsAsErrors=true` + SonarQube | Zero compiler warnings tolerated; SonarQube Quality Gate must pass `OK`. |
+| **3. Test & TRX Evidence** | V&V Verification | `dotnet test --logger "trx;LogFileName=..."` | 100% pass rate required; archives machine-readable TRX evidence for audit. |
+| **4. Packaging & CVE Scan** | Attack Surface Reduction | Docker multi-stage (Ubuntu Chiseled) + Trivy Scanner | Blocks push if unpatched CRITICAL CVEs exist; pushes signed digests to Nexus. |
+| **4.5. Release Readiness (RRR)** | Continuous Delivery | Jira API REST notification + Jenkins `input` step | Requires authorized human approval within `PROMOTION_TIMEOUT_MINUTES`. |
+| **5. SIL Hardware Cutover** | Zero-Downtime Blue/Green | Ansible playbook (`deploy.yml`) + NGINX reload | Asserts `/dev/i2c-1` presence; atomic upstream reload on port `8085`. |
+| **7. Ingress Verification** | Autonomous Resilience | HTTP polling + automated recovery ladder | Reverts to holding slot on failure; locks into 503 quarantine if double-faulted. |
+| **Post Actions** | Regulatory Traceability | Jira Cloud REST API + workspace cleanup | Synchronizes release tag and artifact digests back to Jira ticket (`DRS-12`). |
+
+---
+## 6. Immutable Custom Build Runner Infrastructure
 
 In air-gapped defence environments, running dynamic package downloads (`apt-get update`, `dotnet tool install`) during every CI/CD run introduces supply-chain vulnerabilities, slows build throughput, and violates Configuration Management baselines. 
 
@@ -121,7 +216,7 @@ docker push nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-so
 
 ---
 
-## 6. DevSecOps & Supply Chain Governance
+## 7. DevSecOps & Supply Chain Governance
 
 ### 1. Solution-Wide Deterministic Configuration (`Directory.Build.props`)
 ```xml
@@ -222,7 +317,7 @@ ENTRYPOINT ["dotnet", "MissionControl.Api.dll"]
 
 ---
 
-## 7. Blue/Green Zero-Downtime Deployment Engine
+## 8. Blue/Green Zero-Downtime Deployment Engine
 
 ### Dynamic Slot Topology Calculation (`ansible/roles/blue_green/tasks/main.yml`)
 ```yaml
@@ -295,7 +390,7 @@ server {
 
 ---
 
-## 8. Hardware-in-the-Loop (HIL) Pre-Flight Gating
+## 9. Hardware-in-the-Loop (HIL) Pre-Flight Gating
 
 ```yaml
 # ==============================================================================
@@ -355,7 +450,7 @@ server {
 
 ---
 
-## 9. Autonomous Fail-Safe & Watchdog Engine
+## 10. Autonomous Fail-Safe & Watchdog Engine
 
 ### Autonomous Node Watchdog (`/opt/mission-control/bin/sil-watchdog.sh`)
 ```bash
@@ -519,7 +614,7 @@ done
 
 ---
 
-## 10. Configuration Control & Audit Compliance
+## 11. Configuration Control & Audit Compliance
 
 ### 1. Process-Table Secret Masking via Ansible Vault
 To prevent secrets from leaking into `/proc/<pid>/cmdline` or `ps aux`, secrets are committed encrypted via AES-256 in `ansible/group_vars/sil_nodes/vault.yml`:
@@ -558,7 +653,7 @@ curl -s -f -X POST \
 
 ---
 
-## 11. Verification & Validation Runbook
+## 12. Verification & Validation Runbook
 
 ### Clean Automated Pipeline Run
 ```bash
@@ -591,7 +686,7 @@ docker stop mc-blue
 ```
 
 ---
-## 12. Systems Integration Lab (SIL) Hardware Troubleshooting & RCA Matrix
+## 13. Systems Integration Lab (SIL) Hardware Troubleshooting & RCA Matrix
 
 During the commissioning and verification of the physical testbed (Lenovo ThinkPad WSL2 workstation, Ubuntu Mini PC CI controller, and Raspberry Pi 400 ARM64 SIL target node), several low-level kernel, networking, and supply-chain anomalies were diagnosed and resolved. The matrix below documents the root cause analysis (RCA) and automated engineering mitigations applied under IEEE 828 configuration control.
 
@@ -607,7 +702,7 @@ During the commissioning and verification of the physical testbed (Lenovo ThinkP
 | **Process-Table Security** | Sensitive registry and Jira tokens potentially visible via `ps aux` and `/proc/<pid>/cmdline`. | Command-line CLI flags (`-e nexus_pass=...` and `curl -u user:token`) leak plaintext arguments to host process tables in multi-tenant environments. | Migrated secrets to AES-256 encrypted Ansible Vault files and ephemeral `curl -K` configuration files securely shredded (`shred -u -z`) upon task completion. | Jenkins credential file bindings passed strictly via `--vault-password-file` and memory buffers, satisfying CGP cyber postures. |
 ---
 
-## 13. CI/CD Control Plane Provisioning (Infrastructure-as-Code)
+## 14. CI/CD Control Plane Provisioning (Infrastructure-as-Code)
 
 The core delivery toolchain (Jenkins DooD, Sonatype Nexus OSS, and SonarQube) running on the Mini PC controller is fully containerized and provisioned deterministically via Docker Compose and systemd host units.
 
@@ -616,7 +711,7 @@ The core delivery toolchain (Jenkins DooD, Sonatype Nexus OSS, and SonarQube) ru
 * **Deterministic Deployment Runbook:** For exact compose manifests, reverse-proxy network bindings, and systemd service descriptors, inspect [`docs/infra-provisioning.md`](docs/infra-provisioning.md).
 
 ---
-## 14. Engineering Standards & Methodologies
+## 15. Engineering Standards & Methodologies
 
 * **Configuration Management:** IEEE 828-2012 / EIA-649 Standards for Configuration Baselines.
 * **Static Code Analysis:** SonarQube Clean Architecture / Roslyn Code Analysis Rules (`CA1861`, `CA1852`).
