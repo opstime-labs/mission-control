@@ -43,10 +43,131 @@ An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework 
 ---
 
 ## 2. System Architecture
+<!--
 <p align="center">
   <img src="docs/assets/system-architecture.svg" alt="MissionControl System Architecture" width="900" />
 </p>
+-->
 
+```mermaid
+flowchart TB
+    %% =========================================================================
+    %% STYLING DEFINITIONS (Defence/Enterprise Theme)
+    %% =========================================================================
+    classDef workstation fill:#1e293b,stroke:#0284c7,stroke-width:2px,color:#f8fafc;
+    classDef controller  fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#f8fafc;
+    classDef registry    fill:#1e1e38,stroke:#8b5cf6,stroke-width:2px,color:#f8fafc;
+    classDef quality     fill:#14231b,stroke:#10b981,stroke-width:2px,color:#f8fafc;
+    classDef silTarget   fill:#064e3b,stroke:#059669,stroke-width:2px,color:#f8fafc;
+    classDef airgap      fill:#451a03,stroke:#d97706,stroke-width:2px,stroke-dasharray: 5 5,color:#fef3c7;
+    classDef external    fill:#18181b,stroke:#71717a,stroke-width:2px,color:#e4e4e7;
+    classDef recovery    fill:#4c0519,stroke:#e11d48,stroke-width:2px,color:#ffe4e6;
+
+    %% =========================================================================
+    %% EXTERNAL TRACEABILITY & ISSUE TRACKING
+    %% =========================================================================
+    subgraph EXT_GOV ["GOVERNANCE & TRACEABILITY LAYER"]
+        JIRA["Atlassian Jira Cloud<br/><b>Issue: DRS-12</b><br/>• Work Tracking & Audit Trail<br/>• RRR Sign-Off Telemetry"]:::external
+        GITHUB["GitHub SCM<br/><b>Repo: MissionControl</b><br/>• Branch Protection: main<br/>• PR Enforced Commit Checks"]:::external
+    end
+
+    %% =========================================================================
+    %% TIER 1: DEV / ADMIN WORKSTATION
+    %% =========================================================================
+    subgraph NODE_DEV ["WORKSTATION: Lenovo ThinkPad (homelab-dev)"]
+        WSL["WSL2 (Ubuntu 24.04)<br/>• VS Code & Git CLI<br/>• Local MSBuild & NuGet Test<br/>• Out-of-Band Ansible CLI"]:::workstation
+    end
+
+    %% =========================================================================
+    %% TIER 2: CONTROL PLANE & ARTIFACT HUB (MINI PC)
+    %% =========================================================================
+    subgraph NODE_CI ["CONTROL PLANE: Ubuntu Mini PC (10.0.0.182 / homelab-node1)"]
+        subgraph CI_SERVICES ["Docker Engine (DooD Supervisor)"]
+            JENKINS["Jenkins Controller LTS (:8080)<br/>• Pipeline-as-Code Engine<br/>• Docker-out-of-Docker Agent<br/>• Ephemeral Build Executors"]:::controller
+            
+            subgraph NEXUS_BOX ["Sonatype Nexus OSS (:8081 / :8082)"]
+                NEXUS_OCI["Private OCI Registry (:8082)<br/>• Immutable Release Images<br/>• Builder Base Images"]:::registry
+                NEXUS_NUGET["Hosted NuGet Feed (:8081)<br/>• PackageSourceMapping (*) Feed<br/>• Zero Public Ingress Leaks"]:::registry
+                NEXUS_RAW["Raw Artifact Feed<br/>• Release Binary Tarballs<br/>• Checksums & Signatures"]:::registry
+            end
+
+            SONAR["SonarQube Server (:9000)<br/>• Clean Architecture Rules<br/>• Roslyn Analyzer Integration<br/>• Strict Quality Gate Engine"]:::quality
+            
+            RUNNER["Ephemeral Build Container<br/><b>dotnet-builder:10.0-jdk21-sonar</b><br/>• .NET 10 / 8 SDKs (Deterministic)<br/>• OpenJDK 21 LTS + SonarScanner"]:::controller
+        end
+    end
+
+    %% =========================================================================
+    %% TIER 3: SYSTEMS INTEGRATION LAB (SIL TARGET NODE)
+    %% =========================================================================
+    subgraph NODE_SIL ["SIL TARGET: Raspberry Pi 400 (10.0.0.163 / sil-agent-01)"]
+        subgraph SIL_INGRESS ["Host Ingress Gateway"]
+            PROXY["Reverse Proxy (mc-proxy)<br/><b>NGINX 1.27 Alpine (:8085)</b><br/>• Dynamic Upstream Config<br/>• Atomic Worker Reload<br/>• 503 Quarantine Responder"]:::silTarget
+        end
+
+        subgraph APP_SLOTS ["Blue/Green Application Containers"]
+            SLOT_BLUE["Slot: mc-blue (:5001)<br/>• Ubuntu Chiseled Non-Root<br/>• ASP.NET Core Mission API<br/>• Active or Holding Standby"]:::silTarget
+            SLOT_GREEN["Slot: mc-green (:5002)<br/>• Ubuntu Chiseled Non-Root<br/>• ASP.NET Core Mission API<br/>• Active or Holding Standby"]:::silTarget
+        end
+
+        subgraph HARDWARE_BUS ["HIL Kernel Hardware Interface"]
+            I2C["Broadcom I2C Bus<br/><b>/dev/i2c-1</b> (Sensors)"]:::silTarget
+            GPIO["Memory-Mapped GPIO<br/><b>/dev/gpiomem</b>"]:::silTarget
+        end
+
+        subgraph SUPERVISOR ["Local Resilience & Supervisory Control"]
+            WATCHDOG["Systemd Watchdog Daemon<br/><b>sil-watchdog.service</b><br/>• Autonomous Probe (:8085)<br/>• Independent Local Rollback<br/>• Double-Fault Circuit Breaker"]:::recovery
+            ACTIVE_STATE["Active Slot Marker<br/><code>/opt/mission-control/active_slot</code>"]:::silTarget
+        end
+    end
+
+    %% =========================================================================
+    %% TIER 4: AIR-GAP SIMULATION NODE
+    %% =========================================================================
+    subgraph NODE_AIRGAP ["AIR-GAP STAGING: Raspberry Pi 3B (sil-isolated)"]
+        BASTION["Isolated Staging Gateway<br/>• Local Artifact Mirror<br/>• Offline Air-Gap Transfer Simulation<br/>• Boundary Assertion Check"]:::airgap
+    end
+
+    %% =========================================================================
+    %% RELATIONS & PIPELINE DATA FLOWS
+    %% =========================================================================
+    %% Dev to Git & Jira
+    WSL -->|"1. Git Push / Commit (DRS-12)"| GITHUB
+    JIRA <-->|"Jira Webhook / Status Trace"| GITHUB
+
+    %% CI Trigger & Run
+    GITHUB -->|"2. Webhook Trigger"| JENKINS
+    JENKINS -->|"3. Spawn DooD Container"| RUNNER
+    
+    %% Build runner dependencies & scans
+    RUNNER <-->|"4. Pull / Publish NuGet Feeds"| NEXUS_NUGET
+    RUNNER -->|"5. SAST & Quality Gate Probe"| SONAR
+    RUNNER -->|"6. Push Multi-Arch Chiseled Image"| NEXUS_OCI
+
+    %% Promotion Gate
+    JENKINS <-->|"7. Post Release Telemetry & Await RRR Sign-Off"| JIRA
+
+    %% Deployment Orchestration
+    JENKINS -->|"8. Day-2 Cutover (ansible/deploy.yml)"| NODE_SIL
+    WSL -.->|"Day-0 Commissioning (provision_sil.yml)"| NODE_SIL
+
+    %% SIL Internal Wiring
+    PROXY -->|"Ingress Routing (Port 8085)"| SLOT_BLUE
+    PROXY -.->|"Standby Route Cutover"| SLOT_GREEN
+    
+    SLOT_BLUE --- I2C
+    SLOT_BLUE --- GPIO
+    SLOT_GREEN --- I2C
+    SLOT_GREEN --- GPIO
+
+    WATCHDOG -.->|"Monitors Ingress Socket (:8085)"| PROXY
+    WATCHDOG -->|"Enforces Active Slot"| ACTIVE_STATE
+
+    %% Pipeline Feedback & Artifact Transfer
+    NODE_SIL -->|"9. Ingress Smoke Test Passed / Rollback Signal"| JENKINS
+    JENKINS -->|"10. Update Jira with Build URL, Digest & Status"| JIRA
+    NEXUS_RAW -.->|"Air-Gap Artifact Synchronization"| BASTION
+```
 ---
 
 ## 3. Hardware-in-the-Loop (HIL) Testbed Topology
