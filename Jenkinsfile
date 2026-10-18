@@ -228,14 +228,15 @@ pipeline {
                                   --locked-mode \
                                   --configfile nuget.config
 
-                                echo "--> [SAST Begin] Initializing SonarScanner analysis hook..."
+                                echo "--> [SAST Begin] Initializing SonarScanner analysis hook..."                                
                                 dotnet-sonarscanner begin \
-                                  /k:"${env.SONAR_PROJECT_KEY}" \
-                                  /d:sonar.host.url="${env.SONAR_HOST_URL}" \
-                                  /d:sonar.token="\${SONAR_TOKEN}" \
-                                  /d:sonar.cs.vstest.reportsPaths="/workspace/TestResults/*.trx" \
-                                  /d:sonar.qualitygate.wait=true \
-                                  /d:sonar.scanner.scanAll=false
+                                /k:"${env.SONAR_PROJECT_KEY}" \
+                                /d:sonar.host.url="${env.SONAR_HOST_URL}" \
+                                /d:sonar.token="\${SONAR_TOKEN}" \
+                                /d:sonar.cs.vstest.reportsPaths="/workspace/TestResults/*.trx" \
+                                /d:sonar.cs.opencover.reportsPaths="/workspace/TestResults/**/coverage.opencover.xml" \
+                                /d:sonar.qualitygate.wait=true \
+                                /d:sonar.scanner.scanAll=false
 
                                 echo "--> [V&V Gate] Enforcing zero compiler warnings & deterministic flags..."
                                 dotnet build MissionControl.sln \
@@ -245,13 +246,15 @@ pipeline {
                                   /p:ContinuousIntegrationBuild=true \
                                   /p:Deterministic=true
 
-                                echo "--> [Telemetry] Executing test suite with TRX logger for V&V evidence..."
+                                echo "--> [Telemetry] Executing test suite with TRX and Coverage..."
                                 mkdir -p /workspace/TestResults
                                 dotnet test tests/MissionControl.Tests/MissionControl.Tests.csproj \
-                                  -c Release \
-                                  --no-build \
-                                  --logger "trx;LogFileName=test_results.trx" \
-                                  --results-directory /workspace/TestResults
+                                -c Release \
+                                --no-build \
+                                --logger "trx;LogFileName=test_results.trx" \
+                                --results-directory /workspace/TestResults \
+                                --collect:"XPlat Code Coverage" \
+                                -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
                                 echo "--> [SAST End] Packaging and uploading telemetry to SonarQube..."
                                 dotnet-sonarscanner end /d:sonar.token="\${SONAR_TOKEN}"
