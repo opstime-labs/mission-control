@@ -1,12 +1,13 @@
 # MissionControl: Defence-Grade CI/CD & SIL Deployment Pipeline for C# / .NET
 
-[![Pipeline Security Gate](https://img.shields.io/badge/DevSecOps-SonarQube%20%7C%20Trivy-blue)](#6-devsecops--supply-chain-governance)
-[![Build Runner](https://img.shields.io/badge/Build%20Runner-.NET%2010%20%2F%208%20%2B%20JDK%2021%20%2B%20Sonar-success)](#5-immutable-custom-build-runner-infrastructure)
-[![Runtime Target](https://img.shields.io/badge/Target-Linux%20ARM64%20%2F%20x86__64-orange)](#3-hardware-in-the-loop-hil-testbed-topology)
-[![Audit Compliance](https://img.shields.io/badge/Compliance-Controlled%20Goods%20%7C%20IEEE%20828-green)](#10-configuration-control--audit-compliance)
-[![Ingress Strategy](https://img.shields.io/badge/Ingress-NGINX%20Zero--Downtime%20Blue%2FGreen-blueviolet)](#7-bluegreen-zero-downtime-deployment-engine)
-[![Homelab Setup](https://img.shields.io/badge/Self--Hosted-Jenkins%20Ansible%20Docker%20Nexus%20SonarQube-blue)](#4-tech-stack--tooling-architecture)
-
+[![Security Compliance](https://img.shields.io/badge/Security-Controlled%20Goods%20(CGP)%20%7C%20IEEE%20828-0052cc?style=flat-square&logo=shield)](docs/cgp-compliance-matrix.md)
+[![Traceability Gate](https://img.shields.io/badge/Traceability-JIRA%20%E2%86%92%20Git%20%E2%86%92%20Jenkins%20%E2%86%92%20Nexus-0052cc?style=flat-square&logo=jira)](https://opstime.atlassian.net/browse/DRS-12)
+[![Build & Supply Chain](https://img.shields.io/badge/SDK-.NET%2010%20%2F%208%20%7C%20Locked%20SHA--512-512BD4?style=flat-square&logo=dotnet)](#7-devsecops--supply-chain-governance)
+[![Static Analysis & CVE](https://img.shields.io/badge/DevSecOps-SonarQube%20%7C%20Trivy%20High%2FCritical-4E9BCD?style=flat-square&logo=sonarqube)](#5-cicd-delivery-pipeline-architecture-jenkinsfile)
+[![Runtime Target](https://img.shields.io/badge/Runtime-Ubuntu%20Chiseled%20%28Non--Root%29-E95420?style=flat-square&logo=canonical)](#7-devsecops--supply-chain-governance)
+[![Hardware Testbed](https://img.shields.io/badge/SIL%20Target-RPi%20400%20(ARM64)%20%7C%20I2C%20%2B%20GPIO-C51A4A?style=flat-square&logo=raspberrypi)](#3-hardware-in-the-loop-hil-testbed-topology)
+[![Ingress & Cutover](https://img.shields.io/badge/Ingress-NGINX%20Zero--Downtime%20Blue%2FGreen-009639?style=flat-square&logo=nginx)](#8-bluegreen-zero-downtime-deployment-engine)
+[![Delivery Model](https://img.shields.io/badge/Release-Continuous%20Delivery%20%28RRR%20Gate%29-232F3E?style=flat-square)](#5-cicd-delivery-pipeline-architecture-jenkinsfile)
 An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework engineered for mission-critical C#/.NET naval sensor, combat management, and Electronic Warfare (EW) edge gateways. Purpose-built to satisfy the rigorous audit, configuration control (IEEE 828 / EIA-649), and security mandates of Canadian defence Systems Integration Laboratories (SIL) and tactical edge nodes, this framework demonstrates bit-for-bit reproducible builds, air-gapped supply chain governance, distroless runtime hardening, Hardware-in-the-Loop pre-flight assertions, and autonomous fault recovery.
 
 ---
@@ -179,7 +180,7 @@ In air-gapped defence environments, running dynamic package downloads (`apt-get 
 
 To eliminate out-of-band external dependencies, the pipeline uses a custom, pre-baked, immutable build runner image (`infrastructure/dotnet-builder`) stored directly in our private Sonatype Nexus registry.
 
-### Build Runner Specification (`docker/build-agent/Dockerfile`)
+### Build Runner Specification (`infra/builder/Dockerfile`)
 
 ```dockerfile
 # Pinned OS distribution base: Ubuntu Noble (24.04 LTS) for glibc stability
