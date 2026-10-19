@@ -338,9 +338,21 @@ docker push nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-so
 
 ---
 
-## 7. DevSecOps & Supply Chain Governance
+## 7. DevSecOps, Supply Chain Governance & Threat Model
 
-### 1. Solution-Wide Deterministic Configuration (`Directory.Build.props`)
+In compliance with Canadian Controlled Goods Program (CGP) regulations, NATO air-gap guidelines, and IEEE 828 configuration baselines, security is engineered directly into the build and delivery lifecycle rather than applied as a post-build audit.
+### The Architecture & Threat Matrix
+| Security Tier | Threat Vector Mitigated | Technical Enforcement Mechanism | Compliance / Defence Impact |
+| :--- | :--- | :--- | :--- |
+| **Supply Chain & Feeds** | Dependency confusion, package poisoning, public feed tampering | `<packageSourceMapping>` in `nuget.config` routing `*` strictly to authenticated Nexus hosted repo (`:8081`). | Eliminates internet dependency leakage and untracked code injection in air-gapped environments. |
+| **Dependency Integrity** | Transitive drift, unvetted minor updates | `packages.lock.json` + `dotnet restore --locked-mode` in `Directory.Build.props` (fails on `NU1004`). | Guarantees bit-for-bit cryptographic SHA-512 package reproducibility across all runners. |
+| **Static Code Analysis** | Code smells, unhandled async faults, insecure patterns | Roslyn analyzers + `dotnet-sonarscanner` with synchronous gating (`sonar.qualitygate.wait=true`). | Enforces zero compiler warnings (`/p:TreatWarningsAsErrors=true`) and automated quality gate halts. |
+| **Container Hardening** | Shell escape, lateral movement, root escalation | Ubuntu Chiseled base (`aspnet:10.0-noble-chiseled`) executing under unprivileged `$APP_UID`. | Distroless attack surface reduction: zero shells (`/bin/sh`), zero package managers (`apt`). |
+| **Vulnerability Gating** | Known CVEs and hardcoded secrets | Aquasec Trivy scanning container layers with `--exit-code 1 --severity HIGH,CRITICAL`. | Hard build-breaking gate blocking vulnerable artifacts from entering private OCI registries. |
+| **Credential Protection** | Process table snooping (`ps aux`, `/proc/<pid>/cmdline`) | AES-256 Ansible Vault (`vault.yml`) + ephemeral configuration buffers securely shredded (`shred -u -z`). | Prevents credential leakage across multi-tenant runner kernels and transient memory dumps. |
+| **Delivery Authorization** | Uncoordinated target modification | Stage 4.5 Release Readiness Review (RRR) gate with bounded timeout (`PROMOTION_TIMEOUT_MINUTES`). | Prevents automated CI merges from clobbering active V&V / SIL hardware test sequences. |
+
+### 7.1. Solution-Wide Deterministic Configuration (`Directory.Build.props`)
 ```xml
 <Project>
   <PropertyGroup>
@@ -379,7 +391,7 @@ docker push nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-so
 </Project>
 ```
 
-### 2. Air-Gapped Package Source Mapping (`nuget.config`)
+### 7.2. Air-Gapped Package Source Mapping (`nuget.config`)
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
@@ -398,7 +410,7 @@ docker push nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-so
 </configuration>
 ```
 
-### 3. Hardened Distroless Packaging (`Dockerfile`)
+### 7.3. Hardened Distroless Packaging (`Dockerfile`)
 ```dockerfile
 # Stage 1: Build & Publish via .NET SDK
 FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
@@ -436,6 +448,7 @@ ENV ASPNETCORE_HTTP_PORTS=8080 \
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "MissionControl.Api.dll"]
 ```
+
 
 ---
 
