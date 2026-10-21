@@ -6,4 +6,4 @@ nexus_pass: "{{ vault_nexus_pass }}"
 deploy_user: "deployer"
 deploy_group: "deployer"
 app_base_dir: "/opt/mission-control"
-ingress_port: 8085
+ingress_port: 8085  
