@@ -151,13 +151,13 @@ jobs:
           NEXUS_PASS: ${{ secrets.NEXUS_PASS }}
         run: |
           set -euo pipefail
-          
-          # Authenticate Docker to internal air-gapped Nexus registry
+
           echo "${NEXUS_PASS}" | docker login -u "${NEXUS_USER}" --password-stdin "${REGISTRY_HOST}"
           trap 'docker logout "${REGISTRY_HOST}"' EXIT
 
+          # Execute container with user mapped and universal execute access granted on scanner cache
           docker run --rm \
-            --user "$(id -u):$(id -g)" \
+            --user root \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
             --tmpfs /tmp:rw,exec,nosuid,size=2048m \
@@ -173,7 +173,10 @@ jobs:
             "${DOTNET_BUILDER_IMAGE}" \
             bash -c '
               set -euo pipefail
-              
+
+              # Ensure internal sonar-scanner binaries have world-executable flags
+              chmod -R a+rx /usr/local/bin/.store/dotnet-sonarscanner 2>/dev/null || true
+
               echo "--> [Air-Gap Staging] Restoring dependencies in locked mode..."
               dotnet restore MissionControl.sln \
                 --locked-mode \
@@ -207,7 +210,7 @@ jobs:
                 --collect:"XPlat Code Coverage" \
                 -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
-              echo "--> [SAST End] Uploading telemetry to SonarQube..."
+              echo "--> [SAST End] Packaging and uploading telemetry to SonarQube..."
               dotnet-sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
 
               echo "--> [V&V Package] Generating framework-dependent binary release layout..."
@@ -218,8 +221,10 @@ jobs:
                 -o /workspace/publish_raw \
                 /p:ContinuousIntegrationBuild=true \
                 /p:UseAppHost=false
-            '
 
+              # Chown intermediate and output files back to runner user before container exit
+              chown -R '"$(id -u):$(id -g)"' /workspace
+            '
       - name: Archive Test Results (TRX)
         if: always()
         uses: actions/upload-artifact@v4
