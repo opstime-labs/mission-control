@@ -157,6 +157,7 @@ jobs:
           trap 'docker logout "${REGISTRY_HOST}"' EXIT
 
           docker run --rm \
+            --user "$(id -u):$(id -g)" \
             -v "${GITHUB_WORKSPACE}:/workspace" \
             -w /workspace \
             --tmpfs /tmp:rw,exec,nosuid,size=2048m \
