@@ -308,6 +308,10 @@ jobs:
         with:
           driver-opts: |
             network=host
+          buildkitd-config-inline: |
+            [registry."nexus.homelab.local:8082"]
+              http = true
+              insecure = true
 
       - name: Build Local Candidate Container for Trivy Gating
         env:
