@@ -167,6 +167,8 @@ jobs:
             -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             -e ContinuousIntegrationBuild=true \
             -e SONAR_TOKEN="${SONAR_TOKEN}" \
+            -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
+            -e SONAR_PROJECT_KEY="${SONAR_PROJECT_KEY}" \
             "${DOTNET_BUILDER_IMAGE}" \
             bash -c '
               set -euo pipefail
