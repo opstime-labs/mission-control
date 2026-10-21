@@ -1,0 +1,70 @@
+---
+# ==========================================================
+# Ansible Playbook: setup_gh_actions_runner.yml
+# Command line usage:
+# source .env && ansible-playbook -i ansible/inventory.ini ansible/setup_gh_actions_runner.yml \
+#  --private-key ~/.ssh/id_ed25519 \
+#  -K
+# ==========================================================
+- name: Provision GitHub Actions Runner
+  hosts: ci_controller
+  become: false
+
+  vars:
+    runner_version: "2.337.0"
+    runner_user: "{{ ansible_user_id }}"
+    runner_dir: "{{ ansible_user_dir }}/actions-runner"
+    github_owner_repo: "opstime-labs/mission-control"
+
+  tasks:
+    - name: Create runner directory
+      ansible.builtin.file:
+        path: "{{ runner_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Download and unpack GitHub Actions Runner release
+      ansible.builtin.unarchive:
+        src: "https://github.com/actions/runner/releases/download/v{{ runner_version }}/actions-runner-linux-x64-{{ runner_version }}.tar.gz"
+        dest: "{{ runner_dir }}"
+        remote_src: yes
+        creates: "{{ runner_dir }}/config.sh"
+
+    - name: Check if runner is already configured
+      ansible.builtin.stat:
+        path: "{{ runner_dir }}/.runner"
+      register: runner_configured
+
+    - name: Configure runner with GitHub repository
+      ansible.builtin.command:
+        cmd: >
+          ./config.sh
+          --url "https://github.com/{{ github_owner_repo }}"
+          --token "{{ github_runner_registration_token }}"
+          --name "{{ inventory_hostname }}-runner"
+          --labels "self-hosted,linux,x64,homelab"
+          --work "_work"
+          --unattended
+          --replace
+        chdir: "{{ runner_dir }}"
+      when: not runner_configured.stat.exists
+
+    - name: Check systemd service installation
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/actions.runner.{{ github_owner_repo | replace('/', '-') }}.{{ inventory_hostname }}-runner.service"
+      register: service_installed
+
+    - name: Install systemd service via svc.sh
+      become: true
+      ansible.builtin.command:
+        cmd: "./svc.sh install {{ runner_user }}"
+        chdir: "{{ runner_dir }}"
+      when: not service_installed.stat.exists
+
+    - name: Start runner service
+      become: true
+      ansible.builtin.command:
+        cmd: "./svc.sh start"
+        chdir: "{{ runner_dir }}"
+      register: svc_start
+      changed_when: "'already running' not in svc_start.stdout"

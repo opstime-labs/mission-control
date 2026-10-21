@@ -1,0 +1,630 @@
+name: "Mission Control SIL Delivery Pipeline"
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths-ignore:
+      - '**.md'
+      - '**.txt'
+      - '**.pdf'
+      - '**.docx'
+      - '**.rst'
+      - '**.adoc'
+      - 'docs/**'
+      - 'documentation/**'
+      - 'wiki/**'
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      ENABLE_BUILD_AND_TEST:
+        description: "Execute .NET build, tests, and SonarQube SAST"
+        type: boolean
+        default: true
+      ENABLE_TRIVY_SCAN:
+        description: "Execute Trivy container vulnerability scan (breaks on HIGH/CRITICAL)"
+        type: boolean
+        default: true
+      ENABLE_RAW_RELEASE_PUBLISH:
+        description: "Publish framework-dependent .tar.gz and SHA256 to Nexus raw-hosted"
+        type: boolean
+        default: true
+      ENABLE_CONTAINER_PUBLISH:
+        description: "Publish multi-arch container to Nexus OCI registry"
+        type: boolean
+        default: true
+      DEPLOY_STRATEGY:
+        description: "Target SIL Node deployment strategy"
+        type: choice
+        options:
+          - ANSIBLE
+          - STANDALONE_SSH
+          - SKIP
+        default: ANSIBLE
+      DEPLOY_TARGET_HOST:
+        description: "Physical IP/FQDN of target SIL node"
+        type: string
+        default: "10.0.0.163"
+      INGRESS_PORT:
+        description: "NGINX reverse-proxy ingress port"
+        type: string
+        default: "8085"
+      HEALTH_CHECK_ENDPOINT:
+        description: "Ingress health endpoint"
+        type: string
+        default: "/health"
+      ENABLE_INGRESS_HEALTH_CHECK:
+        description: "Verify ingress and trigger recovery ladder on failure"
+        type: boolean
+        default: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+  DOTNET_NOLOGO: 'true'
+  NUGET_XMLDOC_MODE: 'skip'
+  ContinuousIntegrationBuild: 'true'
+  REGISTRY_HOST: 'nexus.homelab.local:8082'
+  IMAGE_NAME: 'mission-control/sensor-gateway'
+  NEXUS_RAW_BASE: 'http://10.0.0.182:8081/repository/raw-hosted'
+  DOTNET_BUILDER_IMAGE: 'nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r1'
+  SONAR_HOST_URL: 'http://10.0.0.182:9000'
+  SONAR_PROJECT_KEY: 'mission-control-api'
+  JIRA_API_URL: 'https://cp4learning.atlassian.net/rest/api/2/issue'
+  DEPLOY_SIL_AGENT_NAME: 'sil-agent-01'
+  DEPLOY_HOST_USER: 'deployer'
+  DEPLOY_HOST_IP: ${{ inputs.DEPLOY_TARGET_HOST || '10.0.0.163' }}
+  INGRESS_PORT: ${{ inputs.INGRESS_PORT || '8085' }}
+  HEALTH_CHECK_ENDPOINT: ${{ inputs.HEALTH_CHECK_ENDPOINT || '/health' }}
+
+jobs:
+  # =========================================================================
+  # STAGE 1: CONFIGURATION AUDIT & TRACEABILITY GATE
+  # =========================================================================
+  audit-gate:
+    runs-on: [self-hosted, linux]
+    outputs:
+      jira_id: ${{ steps.jira_audit.outputs.jira_id }}
+      git_commit_short: ${{ steps.metadata.outputs.git_commit_short }}
+      target_release_tag: ${{ steps.metadata.outputs.target_release_tag }}
+      current_branch: ${{ steps.metadata.outputs.current_branch }}
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 10
+
+      - name: Extract Git Metadata & Set Canonical Variables
+        id: metadata
+        run: |
+          GIT_SHA=$(git rev-parse --short HEAD)
+          BRANCH=$(echo "${{ github.head_ref || github.ref_name }}")
+          RELEASE_TAG="${{ github.run_number }}-${GIT_SHA}"
+          
+          echo "git_commit_short=${GIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "current_branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "target_release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Jira Audit Gate (IEEE 828 / CGP Traceability)
+        id: jira_audit
+        run: |
+          COMMIT_LOGS=$(git log -5 --pretty=%B)
+          SEARCH_STR="${{ steps.metadata.outputs.current_branch }} ${{ github.event.pull_request.title }} ${COMMIT_LOGS}"
+          
+          # Match Jira issue pattern: 2 to 10 uppercase letters followed by dash and numbers
+          if [[ "${SEARCH_STR}" =~ ([A-Za-z]{2,10}-[0-9]+) ]]; then
+            JIRA_KEY=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
+            echo "jira_id=${JIRA_KEY}" >> "$GITHUB_OUTPUT"
+            echo "=========================================================="
+            echo "Traceability Audit Gate: PASSED"
+            echo "Jira Work Item:   ${JIRA_KEY}"
+            echo "Commit SHA:       ${{ steps.metadata.outputs.git_commit_short }}"
+            echo "Release Tag:      ${{ steps.metadata.outputs.target_release_tag }}"
+            echo "Canonical Branch: ${{ steps.metadata.outputs.current_branch }}"
+            echo "Target SIL Node:  ${{ env.DEPLOY_SIL_AGENT_NAME }} (${{ env.DEPLOY_HOST_IP }})"
+            echo "=========================================================="
+          else
+            echo "::error::CONFIGURATION AUDIT FAILURE: No Jira issue key found. Controlled Goods and IEEE 828 standards mandate an active tracking ticket."
+            exit 1
+          fi
+
+  # =========================================================================
+  # STAGE 2: .NET 10 RESTORE, BUILD, TEST & SONARQUBE SAST
+  # =========================================================================
+  build-and-test:
+    needs: audit-gate
+    if: |
+      always() && 
+      needs.audit-gate.result == 'success' && 
+      (github.event_name != 'workflow_dispatch' || inputs.ENABLE_BUILD_AND_TEST != false)
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Execute Deterministic Build and SAST in Isolated Container
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASS: ${{ secrets.NEXUS_PASS }}
+        run: |
+          set -euo pipefail
+
+          echo "${NEXUS_PASS}" | docker login -u "${NEXUS_USER}" --password-stdin "${REGISTRY_HOST}"
+          trap 'docker logout "${REGISTRY_HOST}"' EXIT
+
+          # Execute container with user mapped and universal execute access granted on scanner cache
+          docker run --rm \
+            --user root \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -w /workspace \
+            --tmpfs /tmp:rw,exec,nosuid,size=2048m \
+            -e HOME=/tmp \
+            -e DOTNET_CLI_HOME=/tmp/.dotnet \
+            -e NUGET_PACKAGES=/tmp/.nuget/packages \
+            -e PATH="/usr/local/bin:/usr/bin:/bin" \
+            -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            -e ContinuousIntegrationBuild=true \
+            -e SONAR_TOKEN="${SONAR_TOKEN}" \
+            -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
+            -e SONAR_PROJECT_KEY="${SONAR_PROJECT_KEY}" \
+            "${DOTNET_BUILDER_IMAGE}" \
+            bash -c '
+              set -euo pipefail
+
+              # Ensure internal sonar-scanner binaries have world-executable flags
+              chmod -R a+rx /usr/local/bin/.store/dotnet-sonarscanner 2>/dev/null || true
+
+              echo "--> [Air-Gap Staging] Restoring dependencies in locked mode..."
+              dotnet restore MissionControl.sln \
+                --locked-mode \
+                --configfile nuget.config
+
+              echo "--> [SAST Begin] Initializing SonarScanner analysis hook..."
+              dotnet-sonarscanner begin \
+                /k:"${SONAR_PROJECT_KEY}" \
+                /d:sonar.host.url="${SONAR_HOST_URL}" \
+                /d:sonar.token="${SONAR_TOKEN}" \
+                /d:sonar.cs.vstest.reportsPaths="/workspace/TestResults/*.trx" \
+                /d:sonar.cs.opencover.reportsPaths="/workspace/TestResults/**/coverage.opencover.xml" \
+                /d:sonar.qualitygate.wait=true \
+                /d:sonar.scanner.scanAll=false
+
+              echo "--> [V&V Gate] Enforcing zero compiler warnings & deterministic flags..."
+              dotnet build MissionControl.sln \
+                -c Release \
+                --no-restore \
+                /p:TreatWarningsAsErrors=true \
+                /p:ContinuousIntegrationBuild=true \
+                /p:Deterministic=true
+
+              echo "--> [Telemetry] Executing test suite with TRX and Coverage..."
+              mkdir -p /workspace/TestResults
+              dotnet test tests/MissionControl.Tests/MissionControl.Tests.csproj \
+                -c Release \
+                --no-build \
+                --logger "trx;LogFileName=test_results.trx" \
+                --results-directory /workspace/TestResults \
+                --collect:"XPlat Code Coverage" \
+                -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+              echo "--> [SAST End] Packaging and uploading telemetry to SonarQube..."
+              dotnet-sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+
+              echo "--> [V&V Package] Generating framework-dependent binary release layout..."
+              rm -rf /workspace/publish_raw
+              dotnet publish src/MissionControl.Api/MissionControl.Api.csproj \
+                -c Release \
+                --no-restore \
+                -o /workspace/publish_raw \
+                /p:ContinuousIntegrationBuild=true \
+                /p:UseAppHost=false
+
+              # Chown intermediate and output files back to runner user before container exit
+              chown -R '"$(id -u):$(id -g)"' /workspace
+            '
+      - name: Archive Test Results (TRX)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-trx
+          path: TestResults/*.trx
+          retention-days: 15
+
+      - name: Upload Raw Release Staging Stash
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-raw-binaries
+          path: publish_raw/
+          retention-days: 1
+
+  # =========================================================================
+  # STAGE 3: PUBLISH RAW BINARY RELEASE ARCHIVE TO NEXUS
+  # =========================================================================
+  publish-raw-release:
+    needs: [audit-gate, build-and-test]
+    if: |
+      always() && 
+      needs.build-and-test.result == 'success' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+      (github.event.inputs.ENABLE_RAW_RELEASE_PUBLISH != false)
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Download Staged Binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: publish-raw-binaries
+          path: publish_raw
+
+      - name: Package Tarball, Compute SHA-256 & Publish to Nexus Raw
+        env:
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASS: ${{ secrets.NEXUS_PASS }}
+          TARGET_RELEASE_TAG: ${{ needs.audit-gate.outputs.target_release_tag }}
+        run: |
+          set -euo pipefail
+          RELEASE_DIR="release_dist"
+          mkdir -p "${RELEASE_DIR}"
+
+          ARTIFACT_NAME="mission-control-api-${TARGET_RELEASE_TAG}.tar.gz"
+          CHECKSUM_NAME="${ARTIFACT_NAME}.sha256"
+
+          echo "--> Packaging binary release archive..."
+          tar -czf "${RELEASE_DIR}/${ARTIFACT_NAME}" -C "${GITHUB_WORKSPACE}/publish_raw" .
+          
+          cd "${RELEASE_DIR}"
+          sha256sum "${ARTIFACT_NAME}" > "${CHECKSUM_NAME}"
+
+          UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/${{ github.run_number }}"
+
+          echo "--> Publishing binary package to: ${UPLOAD_URL}/${ARTIFACT_NAME}"
+          curl -s -f -u "${NEXUS_USER}:${NEXUS_PASS}" \
+            --upload-file "${ARTIFACT_NAME}" \
+            "${UPLOAD_URL}/${ARTIFACT_NAME}"
+
+          echo "--> Publishing SHA-256 verification digest: ${UPLOAD_URL}/${CHECKSUM_NAME}"
+          curl -s -f -u "${NEXUS_USER}:${NEXUS_PASS}" \
+            --upload-file "${CHECKSUM_NAME}" \
+            "${UPLOAD_URL}/${CHECKSUM_NAME}"
+
+  # =========================================================================
+  # STAGE 4: CONTAINER SECURITY GATE & MULTI-ARCH PUBLISH
+  # =========================================================================
+  container-security-and-publish:
+    needs: [audit-gate, build-and-test]
+    if: |
+      always() && 
+      needs.build-and-test.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.ENABLE_CONTAINER_PUBLISH != false)
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Local Candidate Container for Trivy Gating
+        env:
+          LOCAL_SCAN_TAG: "mission-control/sensor-gateway:scan-${{ github.run_number }}"
+        run: |
+          echo "--> Building candidate container with Chiseled runtime..."
+          docker buildx build \
+            --load \
+            --build-arg BUILD_NUMBER=${{ github.run_number }} \
+            --build-arg GIT_COMMIT=${{ needs.audit-gate.outputs.git_commit_short }} \
+            -t "${LOCAL_SCAN_TAG}" \
+            -f Dockerfile .
+
+      - name: Enforce Trivy Vulnerability Scan (--exit-code 1)
+        if: ${{ github.event.inputs.ENABLE_TRIVY_SCAN != false }}
+        env:
+          LOCAL_SCAN_TAG: "mission-control/sensor-gateway:scan-${{ github.run_number }}"
+        run: |
+          echo "--> [V&V Security Gate] Scanning candidate container via Trivy..."
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL \
+            --scanners vuln,secret \
+            --exit-code 1 \
+            --format table \
+            "${LOCAL_SCAN_TAG}"
+
+      - name: Authenticate, Build & Push Multi-Arch Images (amd64 + arm64)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASS: ${{ secrets.NEXUS_PASS }}
+          TARGET_RELEASE_TAG: ${{ needs.audit-gate.outputs.target_release_tag }}
+        run: |
+          set -euo pipefail
+          echo "${NEXUS_PASS}" | docker login -u "${NEXUS_USER}" --password-stdin "${REGISTRY_HOST}"
+          trap 'docker logout "${REGISTRY_HOST}"' EXIT
+
+          echo "--> Publishing multi-arch images (amd64, arm64) to Nexus..."
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg BUILD_NUMBER=${{ github.run_number }} \
+            --build-arg GIT_COMMIT=${{ needs.audit-gate.outputs.git_commit_short }} \
+            -t "${REGISTRY_HOST}/${IMAGE_NAME}:${TARGET_RELEASE_TAG}" \
+            -t "${REGISTRY_HOST}/${IMAGE_NAME}:latest" \
+            --push \
+            -f Dockerfile .
+
+          docker builder prune -f --filter "until=24h"
+
+      - name: Post Cleanup Scan Tags
+        if: always()
+        run: |
+          docker rmi "mission-control/sensor-gateway:scan-${{ github.run_number }}" 2>/dev/null || true
+
+  # =========================================================================
+  # STAGE 4.5: RELEASE READINESS REVIEW & JIRA NOTIFICATION
+  # =========================================================================
+  release-review:
+    needs: [audit-gate, build-and-test, publish-raw-release, container-security-and-publish]
+    if: |
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+      (github.event.inputs.DEPLOY_STRATEGY != 'SKIP')
+    runs-on: [self-hosted, linux]
+    environment: production-sil # GitHub Environment configured with required reviewers
+    steps:
+      - name: Post Jira Staging Telemetry
+        env:
+          JIRA_USER: ${{ secrets.JIRA_USER }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          JIRA_ID: ${{ needs.audit-gate.outputs.jira_id }}
+          TARGET_RELEASE_TAG: ${{ needs.audit-gate.outputs.target_release_tag }}
+        run: |
+          set -euo pipefail
+          CURL_CONF=$(mktemp)
+          chmod 600 "${CURL_CONF}"
+          trap 'rm -f "${CURL_CONF}"' EXIT INT TERM
+          
+          AUTH_B64=$(printf "%s:%s" "${JIRA_USER}" "${JIRA_TOKEN}" | base64 | tr -d '\n')
+          echo "header = \"Authorization: Basic ${AUTH_B64}\"" > "${CURL_CONF}"
+
+          COMMENT="📋 RELEASE READINESS GATE: Run [#${{ github.run_number }}|${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}] passed SonarQube SAST, unit tests, and Trivy CVE gating.\n\nArtifact [${TARGET_RELEASE_TAG}] is staged in Nexus and authorized for SIL Node cutover [${{ env.DEPLOY_SIL_AGENT_NAME }}]."
+          
+          curl -s -f -X POST \
+            -K "${CURL_CONF}" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d "{\"body\": \"${COMMENT}\"}" \
+            "${JIRA_API_URL}/${JIRA_ID}/comment" || echo "[WARNING] Jira comment failed."
+
+  # =========================================================================
+  # STAGE 5 & 6: DEPLOY TO SIL HARDWARE NODE (ANSIBLE OR SSH)
+  # =========================================================================
+  deploy-to-sil:
+    needs: [audit-gate, release-review]
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Execute Containerized Ansible Deployment
+        if: ${{ github.event.inputs.DEPLOY_STRATEGY == 'ANSIBLE' || github.event.inputs.DEPLOY_STRATEGY == null }}
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SIL_NODE_SSH_KEY }}
+          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          TARGET_RELEASE_TAG: ${{ needs.audit-gate.outputs.target_release_tag }}
+        run: |
+          set -euo pipefail
+          KEY_TMP="./id_rsa_deploy"
+          VAULT_TMP="./vault_pass_tmp"
+
+          echo "${SSH_PRIVATE_KEY}" > "${KEY_TMP}"
+          echo "${VAULT_PASSWORD}" > "${VAULT_TMP}"
+          chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
+          trap 'shred -u -z -v -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
+
+          CURRENT_ACTIVE=$(ssh -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
+          echo "--> Baseline active slot on target SIL node: [${CURRENT_ACTIVE}]"
+
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -e ANSIBLE_HOST_KEY_CHECKING=False \
+            -w /workspace \
+            alpine/ansible:latest \
+            ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
+              --private-key "/workspace/${KEY_TMP#./}" \
+              --vault-password-file "/workspace/${VAULT_TMP#./}" \
+              -u "${DEPLOY_HOST_USER}" \
+              -e "target_tag=${TARGET_RELEASE_TAG}"
+
+      - name: Standalone SSH Cutover (Fallback Strategy)
+        if: ${{ github.event.inputs.DEPLOY_STRATEGY == 'STANDALONE_SSH' }}
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SIL_NODE_SSH_KEY }}
+          TARGET_RELEASE_TAG: ${{ needs.audit-gate.outputs.target_release_tag }}
+        run: |
+          set -euo pipefail
+          KEY_TMP="./id_rsa_deploy"
+          echo "${SSH_PRIVATE_KEY}" > "${KEY_TMP}"
+          chmod 600 "${KEY_TMP}"
+          trap 'shred -u -z -v -n 3 "${KEY_TMP}" 2>/dev/null || rm -f "${KEY_TMP}"' EXIT INT TERM
+
+          echo "--> Synchronizing deployment scripts to standalone SIL hardware..."
+          ssh -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "mkdir -p /tmp/mission-control"
+          scp -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new infra/scripts/deploy.sh ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP}:/tmp/mission-control/deploy.sh
+          
+          echo "--> Executing cutover for baseline ${TARGET_RELEASE_TAG}..."
+          ssh -i "${KEY_TMP}" ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${TARGET_RELEASE_TAG}"
+          
+          echo "--> Cleaning up temporary staging directories on SIL target..."
+          ssh -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "rm -rf /tmp/mission-control"
+
+  # =========================================================================
+  # STAGE 7: INGRESS VERIFICATION & AUTOMATED TWO-PHASE RECOVERY LADDER
+  # =========================================================================
+  verify-and-recover:
+    needs: [audit-gate, deploy-to-sil]
+    if: |
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+      (github.event.inputs.DEPLOY_STRATEGY != 'SKIP') &&
+      (github.event.inputs.ENABLE_INGRESS_HEALTH_CHECK != false)
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Ingress Health Verification Probe
+        id: probe
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          HEALTH_URL="http://${DEPLOY_HOST_IP}:${INGRESS_PORT}${HEALTH_CHECK_ENDPOINT}"
+          echo "--> Verifying Ingress readiness on ${HEALTH_URL}..."
+          curl --fail --retry 5 --retry-delay 2 --max-time 5 "${HEALTH_URL}"
+          echo "SUCCESS: Primary ingress probe verified."
+
+      # PHASE 1 RECOVERY: Automated Ansible Rollback
+      - name: Phase 1 Recovery (Rollback to Previous Slot)
+        if: steps.probe.outcome == 'failure'
+        id: rollback
+        continue-on-error: true
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SIL_NODE_SSH_KEY }}
+          VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+          JIRA_USER: ${{ secrets.JIRA_USER }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          JIRA_ID: ${{ needs.audit-gate.outputs.jira_id }}
+          TARGET_RELEASE_TAG: ${{ needs.audit-gate.outputs.target_release_tag }}
+        run: |
+          set -euo pipefail
+          echo "WARNING: Primary verification failed! Invoking Phase 1 automated rollback..."
+          
+          KEY_TMP="./id_rsa_deploy"
+          VAULT_TMP="./vault_pass_tmp"
+          echo "${SSH_PRIVATE_KEY}" > "${KEY_TMP}"
+          echo "${VAULT_PASSWORD}" > "${VAULT_TMP}"
+          chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
+          trap 'shred -u -z -v -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
+
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -e ANSIBLE_HOST_KEY_CHECKING=False \
+            -w /workspace \
+            alpine/ansible:latest \
+            ansible-playbook -i ansible/inventory.ini ansible/rollback.yml \
+              --private-key "/workspace/${KEY_TMP#./}" \
+              --vault-password-file "/workspace/${VAULT_TMP#./}" \
+              -u "${DEPLOY_HOST_USER}"
+
+          HEALTH_URL="http://${DEPLOY_HOST_IP}:${INGRESS_PORT}${HEALTH_CHECK_ENDPOINT}"
+          echo "--> Verifying restored fallback slot ingress on ${HEALTH_URL}..."
+          curl --fail --retry 3 --retry-delay 2 --max-time 5 "${HEALTH_URL}"
+          echo "RECOVERY CONFIRMED: Rollback succeeded. Target node operating in degraded single-slot mode."
+
+          # Post Jira degraded alert
+          CURL_CONF=$(mktemp)
+          chmod 600 "${CURL_CONF}"
+          AUTH_B64=$(printf "%s:%s" "${JIRA_USER}" "${JIRA_TOKEN}" | base64 | tr -d '\n')
+          echo "header = \"Authorization: Basic ${AUTH_B64}\"" > "${CURL_CONF}"
+
+          curl -s -f -X POST \
+            -K "${CURL_CONF}" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d "{\"body\": \"⚠️ DEGRADED DEPLOYMENT ALERT: Release Candidate [${TARGET_RELEASE_TAG}] failed post-deployment smoke test. Automated rollback succeeded. Target node is running in DEGRADED SINGLE-SLOT MODE on previous baseline.\"}" \
+            "${JIRA_API_URL}/${JIRA_ID}/comment"
+          rm -f "${CURL_CONF}"
+
+      # PHASE 2 RECOVERY: Double-Fault Fail-Safe Lockdown
+      - name: Phase 2 Recovery (Double Fault 503 Fail-Safe Lockdown)
+        if: steps.probe.outcome == 'failure' && steps.rollback.outcome == 'failure'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SIL_NODE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          echo "CRITICAL DOUBLE FAULT: Rollback failed! Invoking Phase 2 Fail-Safe Lockdown..."
+          
+          KEY_TMP="./id_rsa_deploy"
+          echo "${SSH_PRIVATE_KEY}" > "${KEY_TMP}"
+          chmod 600 "${KEY_TMP}"
+          trap 'shred -u -z -v -n 3 "${KEY_TMP}" 2>/dev/null || rm -f "${KEY_TMP}"' EXIT INT TERM
+
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/workspace" \
+            -e ANSIBLE_HOST_KEY_CHECKING=False \
+            -w /workspace \
+            alpine/ansible:latest \
+            ansible-playbook -i ansible/inventory.ini ansible/fail_safe.yml \
+              --private-key "/workspace/${KEY_TMP#./}" \
+              -u "${DEPLOY_HOST_USER}"
+
+          echo "::error::CRITICAL DOUBLE FAULT: Both deployment slots failed. SIL node locked in 503 Fail-Safe mode for forensic analysis."
+          exit 1
+
+  # =========================================================================
+  # AUDIT SUMMARY & NOTIFICATION (Post Execution)
+  # =========================================================================
+  audit-summary:
+    needs: [audit-gate, verify-and-recover]
+    if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Post Jira Success Summary
+        if: needs.verify-and-recover.result == 'success'
+        env:
+          JIRA_USER: ${{ secrets.JIRA_USER }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          JIRA_ID: ${{ needs.audit-gate.outputs.jira_id }}
+          TARGET_RELEASE_TAG: ${{ needs.audit-gate.outputs.target_release_tag }}
+          COMMIT_SHA: ${{ needs.audit-gate.outputs.git_commit_short }}
+          BRANCH: ${{ needs.audit-gate.outputs.current_branch }}
+        run: |
+          set -euo pipefail
+          CURL_CONF=$(mktemp)
+          chmod 600 "${CURL_CONF}"
+          trap 'rm -f "${CURL_CONF}"' EXIT INT TERM
+          
+          AUTH_B64=$(printf "%s:%s" "${JIRA_USER}" "${JIRA_TOKEN}" | base64 | tr -d '\n')
+          echo "header = \"Authorization: Basic ${AUTH_B64}\"" > "${CURL_CONF}"
+
+          DOCKER_REF="${REGISTRY_HOST}/${IMAGE_NAME}:${TARGET_RELEASE_TAG}"
+          RAW_URL="${NEXUS_RAW_BASE}/sensor-gateway/${{ github.run_number }}/mission-control-api-${TARGET_RELEASE_TAG}.tar.gz"
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "body": "*CONFIGURATION AUDIT: BASELINE DEPLOYED TO SIL*\nh4. Build & Delivery Telemetry\n* *GitHub Run:* [#${{ github.run_number }}|${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}]\n* *Baseline Branch / Commit:* ${BRANCH} / ${COMMIT_SHA}\n* *Target SIL Node:* ${DEPLOY_SIL_AGENT_NAME} (${DEPLOY_HOST_IP} - Active Slot)\n\nh4. Vetted Release Artifacts (Sonatype Nexus OSS)\n* *Container Registry:* [${DOCKER_REF}|http://${DOCKER_REF}]\n* *Raw Binary Archive:* [mission-control-api-${TARGET_RELEASE_TAG}.tar.gz|${RAW_URL}]\n* *Integrity Digest:* [SHA-256 Verification Hash|${RAW_URL}.sha256]\n\n_Audit baseline recorded for Controlled Goods and V&V compliance._"
+          }
+          EOF
+          )
+
+          curl -s -f -X POST \
+            -K "${CURL_CONF}" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d "${PAYLOAD}" \
+            "${JIRA_API_URL}/${JIRA_ID}/comment" || echo "[WARNING] Jira comment failed to post."
+
+      - name: Post Jira Failure Audit Alert
+        if: needs.verify-and-recover.result == 'failure' && needs.audit-gate.outputs.jira_id != ''
+        env:
+          JIRA_USER: ${{ secrets.JIRA_USER }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
+          JIRA_ID: ${{ needs.audit-gate.outputs.jira_id }}
+          COMMIT_SHA: ${{ needs.audit-gate.outputs.git_commit_short }}
+          BRANCH: ${{ needs.audit-gate.outputs.current_branch }}
+        run: |
+          set -euo pipefail
+          CURL_CONF=$(mktemp)
+          chmod 600 "${CURL_CONF}"
+          trap 'rm -f "${CURL_CONF}"' EXIT INT TERM
+          
+          AUTH_B64=$(printf "%s:%s" "${JIRA_USER}" "${JIRA_TOKEN}" | base64 | tr -d '\n')
+          echo "header = \"Authorization: Basic ${AUTH_B64}\"" > "${CURL_CONF}"
+
+          MSG="BASELINE DEPLOYMENT HALTED: GitHub Run [#${{ github.run_number }}|${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}] (${COMMIT_SHA}) on branch \"${BRANCH}\" failed execution.\n\nInspect Actions execution log."
+          
+          curl -s -f -X POST \
+            -K "${CURL_CONF}" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d "{\"body\": \"${MSG}\"}" \
+            "${JIRA_API_URL}/${JIRA_ID}/comment" || echo "[WARNING] Jira failure comment failed to post."

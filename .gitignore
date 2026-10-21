@@ -20,3 +20,9 @@ TestResults/
 Thumbs.db
 .dotnet_cache/
 .nuget_packages/
+
+# Local secrets and runner tokens
+.env
+*.env
+.env.*
+

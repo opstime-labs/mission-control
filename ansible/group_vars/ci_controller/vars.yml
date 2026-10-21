@@ -1,0 +1,5 @@
+---
+# Evaluates your workstation environment variables cleanly at runtime
+ansible_user: "{{ lookup('env', 'ANSIBLE_MINI_PC_USER') | default('runner', true) }}"
+runner_dir: "{{ lookup('env', 'ANSIBLE_MINI_PC_USER_DIR') | default('/home/runner/actions-runner', true) }}"
+github_runner_registration_token: "{{ lookup('env', 'GITHUB_RUNNER_REGISTRATION_TOKEN') | default('', true) }}"
