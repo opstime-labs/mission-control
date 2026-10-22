@@ -241,14 +241,15 @@ jobs:
           retention-days: 1
 
   # =========================================================================
-  # STAGE 3: PUBLISH RAW BINARY RELEASE ARCHIVE TO NEXUS
+  # STAGE 3: PUBLISH RAW BINARY RELEASE ARCHIVE TO NEXUS (only on main/master)
   # =========================================================================
   publish-raw-release:
-    needs: [audit-gate, build-and-test]    
+    needs: [audit-gate, build-and-test]        
     if: |
-      always() && 
+      always() &&
       needs.build-and-test.result == 'success' &&
-      (github.event_name != 'workflow_dispatch' || github.event.inputs.ENABLE_RAW_RELEASE_PUBLISH != false)
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+      (github.event_name != 'workflow_dispatch' || inputs.ENABLE_RAW_RELEASE_PUBLISH != false)
     runs-on: [self-hosted, linux]
     steps:
       - name: Download Staged Binaries
@@ -288,15 +289,15 @@ jobs:
             --upload-file "${CHECKSUM_NAME}" \
             "${UPLOAD_URL}/${CHECKSUM_NAME}"
 
-  # =========================================================================
-  # STAGE 4: CONTAINER SECURITY GATE & MULTI-ARCH PUBLISH
-  # =========================================================================
+  # ================================================================================================
+  # STAGE 4: CONTAINER SECURITY GATE (on all branches) & MULTI-ARCH PUBLISH (only on main/master)
+  # ================================================================================================
   container-security-and-publish:
-    needs: [audit-gate, build-and-test]
+    needs: [audit-gate, build-and-test]    
     if: |
-      always() && 
-      needs.build-and-test.result == 'success' &&
-      (github.event_name != 'workflow_dispatch' || github.event.inputs.ENABLE_CONTAINER_PUBLISH != false)
+      always() &&
+      needs.build-and-test.result == 'success' &&      
+      (github.event_name != 'workflow_dispatch' || inputs.ENABLE_CONTAINER_PUBLISH != false)
     runs-on: [self-hosted, linux]
     steps:
       - name: Checkout Codebase
@@ -373,8 +374,12 @@ jobs:
   release-review:
     needs: [audit-gate, build-and-test, publish-raw-release, container-security-and-publish]    
     if: |
-      always() &&       
-      (github.event_name != 'workflow_dispatch' || github.event.inputs.DEPLOY_STRATEGY != 'SKIP')
+      always() &&
+      needs.build-and-test.result == 'success' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+      (github.event_name != 'workflow_dispatch' || inputs.DEPLOY_STRATEGY != 'SKIP')
     runs-on: [self-hosted, linux]
     environment: production-sil # GitHub Environment configured with required reviewers
     steps:
@@ -406,7 +411,12 @@ jobs:
   # STAGE 5 & 6: DEPLOY TO SIL HARDWARE NODE (ANSIBLE OR SSH)
   # =========================================================================
   deploy-to-sil:
-    needs: [audit-gate, release-review]
+    needs: [release-review]    
+    if: |
+      always() &&
+      needs.release-review.result == 'success' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
+      (github.event_name != 'workflow_dispatch' || inputs.DEPLOY_STRATEGY != 'SKIP')
     runs-on: [self-hosted, linux]
     steps:
       - name: Checkout Codebase
@@ -468,11 +478,12 @@ jobs:
   # STAGE 7: INGRESS VERIFICATION & AUTOMATED TWO-PHASE RECOVERY LADDER
   # =========================================================================
   verify-and-recover:
-    needs: [audit-gate, deploy-to-sil]
+    needs: [deploy-to-sil]    
     if: |
+      always() &&
+      needs.deploy-to-sil == 'success' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
-      (github.event.inputs.DEPLOY_STRATEGY != 'SKIP') &&
-      (github.event.inputs.ENABLE_INGRESS_HEALTH_CHECK != false)
+      (github.event_name != 'workflow_dispatch' || inputs.ENABLE_INGRESS_HEALTH_CHECK != false)
     runs-on: [self-hosted, linux]
     steps:
       - name: Checkout Codebase
