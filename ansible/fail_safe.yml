@@ -4,8 +4,8 @@
   gather_facts: true
 
   vars:
-    app_base_dir: "/opt/mission-control"
-    triage_dir: "{{ app_base_dir }}/triage/double-fault-{{ ansible_date_time.epoch }}"
+    app_base_dir: "/opt/mission-control"    
+    triage_dir: "{{ app_base_dir }}/triage/double-fault-{{ ansible_facts['date_time']['epoch'] }}"
     ingress_port: 8085
 
   tasks:
