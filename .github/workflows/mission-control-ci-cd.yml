@@ -244,12 +244,11 @@ jobs:
   # STAGE 3: PUBLISH RAW BINARY RELEASE ARCHIVE TO NEXUS
   # =========================================================================
   publish-raw-release:
-    needs: [audit-gate, build-and-test]
+    needs: [audit-gate, build-and-test]    
     if: |
       always() && 
       needs.build-and-test.result == 'success' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
-      (github.event.inputs.ENABLE_RAW_RELEASE_PUBLISH != false)
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.ENABLE_RAW_RELEASE_PUBLISH != false)
     runs-on: [self-hosted, linux]
     steps:
       - name: Download Staged Binaries
@@ -372,10 +371,10 @@ jobs:
   # STAGE 4.5: RELEASE READINESS REVIEW & JIRA NOTIFICATION
   # =========================================================================
   release-review:
-    needs: [audit-gate, build-and-test, publish-raw-release, container-security-and-publish]
+    needs: [audit-gate, build-and-test, publish-raw-release, container-security-and-publish]    
     if: |
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
-      (github.event.inputs.DEPLOY_STRATEGY != 'SKIP')
+      always() &&       
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.DEPLOY_STRATEGY != 'SKIP')
     runs-on: [self-hosted, linux]
     environment: production-sil # GitHub Environment configured with required reviewers
     steps:
