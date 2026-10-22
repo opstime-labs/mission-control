@@ -326,7 +326,7 @@ jobs:
             -f Dockerfile .
 
       - name: Enforce Trivy Vulnerability Scan (--exit-code 1)
-        if: ${{ github.event.inputs.ENABLE_TRIVY_SCAN != false }}
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.ENABLE_TRIVY_SCAN != false }}
         env:
           LOCAL_SCAN_TAG: "mission-control/sensor-gateway:scan-${{ github.run_number }}"
         run: |
@@ -411,7 +411,7 @@ jobs:
   # STAGE 5 & 6: DEPLOY TO SIL HARDWARE NODE (ANSIBLE OR SSH)
   # =========================================================================
   deploy-to-sil:
-    needs: [release-review]    
+    needs: [audit-gate, release-review]    
     if: |
       always() &&
       needs.release-review.result == 'success' &&
@@ -478,7 +478,7 @@ jobs:
   # STAGE 7: INGRESS VERIFICATION & AUTOMATED TWO-PHASE RECOVERY LADDER
   # =========================================================================
   verify-and-recover:
-    needs: [deploy-to-sil]    
+    needs: [audit-gate, deploy-to-sil]    
     if: |
       always() &&
       needs.deploy-to-sil == 'success' &&

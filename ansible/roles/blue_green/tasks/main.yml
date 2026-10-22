@@ -117,6 +117,32 @@
     state: absent
   become: no
 
+- name: Assert deployment target image coordinate is non-empty and well-formed
+  ansible.builtin.assert:
+    that:
+      - target_tag is defined
+      - target_tag | length > 0
+    fail_msg: "FATAL: 'target_tag' is undefined or empty. Received: '{{ target_tag | default('') }}'"
+
+- name: Construct canonical target image coordinate
+  ansible.builtin.set_fact:
+    full_image_ref: "{{ registry_host | default('nexus.homelab.local:8082') }}/{{ image_name | default('mission-control/sensor-gateway') }}:{{ target_tag }}"
+
+- name: Debug resolved container image reference
+  ansible.builtin.debug:
+    msg: "Target container coordinate -> {{ full_image_ref }}"
+
+- name: Ensure target idle slot container is running
+  community.docker.docker_container:
+    name: "mc-{{ target_slot }}"
+    image: "{{ full_image_ref }}"
+    state: started
+    restart_policy: always
+    network_mode: host
+    env:
+      ASPNETCORE_URLS: "http://0.0.0.0:{{ target_port }}"
+      DOTNET_RUNNING_IN_CONTAINER: "true"
+
 - name: Ensure target idle slot container is running
   community.docker.docker_container:
     name: "mc-{{ target_slot }}"
