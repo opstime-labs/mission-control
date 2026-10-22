@@ -333,6 +333,7 @@ flowchart TD
         H -->|Ingress Failure| J["Phase 1: Automated Rollback<br/>(<code>rollback.yml</code> -> Fallback Slot)"]:::recoverClass
         J -->|Double Fault| K["Phase 2: 503 Fail-Safe Lockdown<br/>(<code>fail_safe.yml</code> -> Quarantine)"]:::recoverClass
     end
+```
 ---
 ## 6. Immutable Custom Build Runner Infrastructure
 
