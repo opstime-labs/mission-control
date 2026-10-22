@@ -481,7 +481,7 @@ jobs:
     needs: [audit-gate, deploy-to-sil]    
     if: |
       always() &&
-      needs.deploy-to-sil == 'success' &&
+      needs.deploy-to-sil.result == 'success' &&
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') &&
       (github.event_name != 'workflow_dispatch' || inputs.ENABLE_INGRESS_HEALTH_CHECK != false)
     runs-on: [self-hosted, linux]
