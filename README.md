@@ -8,6 +8,7 @@
 [![Hardware Testbed](https://img.shields.io/badge/SIL%20Target-RPi%20400%20(ARM64)%20%7C%20I2C%20%2B%20GPIO-C51A4A?style=flat-square&logo=raspberrypi)](#3-hardware-in-the-loop-hil-testbed-topology)
 [![Ingress & Cutover](https://img.shields.io/badge/Ingress-NGINX%20Zero--Downtime%20Blue%2FGreen-009639?style=flat-square&logo=nginx)](#8-bluegreen-zero-downtime-deployment-engine)
 [![Delivery Model](https://img.shields.io/badge/Release-Continuous%20Delivery%20%28RRR%20Gate%29-232F3E?style=flat-square)](#5-cicd-delivery-pipeline-architecture-jenkinsfile)
+[![GitHub Actions CI/CD](https://github.com/opstime-labs/mission-control/actions/workflows/mission-control-ci-cd.yml/badge.svg)](https://github.com/opstime-labs/mission-control/actions/workflows/mission-control-ci-cd.yml)
 An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework engineered for mission-critical C#/.NET naval sensor, combat management, and Electronic Warfare (EW) edge gateways. Purpose-built to satisfy the rigorous audit, configuration control (IEEE 828 / EIA-649), and security mandates of Canadian defence Systems Integration Laboratories (SIL) and tactical edge nodes, this framework demonstrates bit-for-bit reproducible builds, air-gapped supply chain governance, distroless runtime hardening, Hardware-in-the-Loop pre-flight assertions, and autonomous fault recovery.
 
 ---
@@ -294,6 +295,44 @@ flowchart TD
 | **7. Ingress Verification** | Autonomous Resilience | HTTP polling + automated recovery ladder | Reverts to holding slot on failure; locks into 503 quarantine if double-faulted. |
 | **Post Actions** | Regulatory Traceability | Jira Cloud REST API + workspace cleanup | Synchronizes release tag and artifact digests back to Jira ticket (`DRS-12`). |
 
+---
+
+## 5.1. Dual-Engine Orchestration: Jenkins & GitHub Actions Parity
+
+To demonstrate enterprise infrastructure flexibility across both legacy on-premises installations and modern enterprise SCM platforms, MissionControl provides **bit-for-bit pipeline parity** across two distinct orchestrators:
+1. **Jenkins Declarative Pipeline (`Jenkinsfile`):** Docker-out-of-Docker (DooD) controller model running on the Ubuntu Mini PC.
+2. **GitHub Actions Enterprise Workflow (`.github/workflows/mission-control-ci-cd.yml`):** Executing on a hardened, self-hosted Linux runner inside the private subnet without public ingress exposure.
+
+```mermaid
+flowchart TD
+    classDef gitClass fill:#24292e,stroke:#f05032,stroke-width:2px,color:#fff;
+    classDef runnerClass fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#fff;
+    classDef gateClass fill:#312e81,stroke:#f59e0b,stroke-width:2px,color:#fff;
+    classDef targetClass fill:#064e3b,stroke:#059669,stroke-width:2px,color:#fff;
+    classDef recoverClass fill:#450a0a,stroke:#ef4444,stroke-width:2px,color:#fff;
+
+    subgraph TRIGGER ["SCM EVENT & AUDIT"]
+        A["Git Commit / PR<br/><code>feature/DRS-30</code>"]:::gitClass --> B["Stage 1: audit-gate<br/>• Regex: <code>(?i)([A-Z]{2,10}-\d+)</code><br/>• IEEE 828 Audit Assertion"]:::gateClass
+    end
+
+    subgraph RUNNER ["SELF-HOSTED RUNNER: Ubuntu Mini PC (10.0.0.182)"]
+        B --> C["Stage 2: build-and-test<br/>• Pinned <code>infrastructure/dotnet-builder</code><br/>• <code>dotnet restore --locked-mode</code><br/>• SonarQube Quality Gate (SAST)"]:::runnerClass
+        C --> D["Stage 3: publish-raw-release<br/>• Ansible Tarball (.tar.gz)<br/>• SHA-256 Digest to Nexus Raw"]:::runnerClass
+        C --> E["Stage 4: container-security-and-publish<br/>• BuildKit (<code>network=host</code>)<br/>• Trivy Scan (<code>--exit-code 1</code>)<br/>• Multi-Arch Push to Nexus OCI (:8082)"]:::runnerClass
+    end
+
+    subgraph PROMOTION ["V&V APPROVAL GATE"]
+        D --> F{"Stage 4.5: release-review<br/>• Environment: <code>production-sil</code><br/>• Wait Timer (2m) + Manual Review"}:::gateClass
+        E --> F
+    end
+
+    subgraph SIL ["SIL TARGET: Raspberry Pi 400 (10.0.0.163)"]
+        F -->|Authorized Sign-Off| G["Stages 5 & 6: deploy-to-sil<br/>• Containerized Ansible (<code>deploy.yml</code>)<br/>• Dynamic Slot Toggle (Blue/Green)<br/>• Atomic NGINX Reload (:8085)"]:::targetClass
+        G --> H{"Stage 7: verify-and-recover<br/>• HTTP Health Probe (:8085/health)"}:::targetClass
+        H -->|HTTP 200 OK| I["Stage 8: audit-summary<br/>• Post Telemetry & Digest to Jira"]:::gateClass
+        H -->|Ingress Failure| J["Phase 1: Automated Rollback<br/>(<code>rollback.yml</code> -> Fallback Slot)"]:::recoverClass
+        J -->|Double Fault| K["Phase 2: 503 Fail-Safe Lockdown<br/>(<code>fail_safe.yml</code> -> Quarantine)"]:::recoverClass
+    end
 ---
 ## 6. Immutable Custom Build Runner Infrastructure
 
