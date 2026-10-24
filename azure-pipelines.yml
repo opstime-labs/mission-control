@@ -176,14 +176,19 @@ stages:
         displayName: 'Deterministic Build & SonarQube Gate'
         steps:
           - checkout: self
-
           - bash: |
               set -euo pipefail
               echo "=== [STAGE 2] DETERMINISTIC RESTORE, BUILD & SAST ==="
               
-              # Log in to private Nexus registry for pre-baked builder image
+              # Diagnostic check: ensure credentials are not empty strings
+              if [ -z "${NEXUS_USER:-}" ] || [ -z "${NEXUS_PASS:-}" ]; then
+                echo "##vso[task.logissue type=error]NEXUS_USER or NEXUS_PASS is empty. Check Azure DevOps variable group / pipeline secrets."
+                exit 1
+              fi
+
+              # Authenticate Docker to local Nexus OCI registry
               echo "$NEXUS_PASS" | docker login -u "$NEXUS_USER" --password-stdin "$(REGISTRY_HOST)"
-              trap 'docker logout "$(REGISTRY_HOST)"' EXIT
+              trap 'docker logout "$(REGISTRY_HOST)" 2>/dev/null || true' EXIT
 
               HOST_UID=$(id -u)
               HOST_GID=$(id -g)
@@ -200,69 +205,45 @@ stages:
                 -e PATH="/usr/local/bin:/usr/bin:/bin" \
                 -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
                 -e ContinuousIntegrationBuild=true \
-                -e SONAR_TOKEN="$(SONAR_TOKEN)" \
+                -e SONAR_TOKEN="${SONAR_TOKEN}" \
                 -e SONAR_HOST_URL="$(SONAR_HOST_URL)" \
                 -e SONAR_PROJECT_KEY="$(SONAR_PROJECT_KEY)" \
                 "$(DOTNET_BUILDER_IMAGE)" \
                 bash -c '
                   set -euo pipefail
-
-                  # World executable permissions on global scanner tools
                   chmod -R a+rx /usr/local/bin/.store/dotnet-sonarscanner 2>/dev/null || true
 
-                  echo "--> [Air-Gap Staging] Restoring dependencies in locked mode..."
-                  dotnet restore MissionControl.sln \
-                    --locked-mode \
-                    --configfile nuget.config
-
-                  echo "--> [SAST Begin] Initializing SonarScanner hook..."
+                  dotnet restore MissionControl.sln --locked-mode --configfile nuget.config
+                  
                   dotnet-sonarscanner begin \
                     /k:"${SONAR_PROJECT_KEY}" \
                     /d:sonar.host.url="${SONAR_HOST_URL}" \
                     /d:sonar.token="${SONAR_TOKEN}" \
                     /d:sonar.cs.vstest.reportsPaths="/workspace/TestResults/*.trx" \
-                    /d:sonar.cs.opencover.reportsPaths="/workspace/TestResults/**/coverage.opencover.xml" \
                     /d:sonar.qualitygate.wait=true \
                     /d:sonar.scanner.scanAll=false
 
-                  echo "--> [V&V Gate] Enforcing zero compiler warnings & deterministic flags..."
-                  dotnet build MissionControl.sln \
-                    -c Release \
-                    --no-restore \
-                    /p:TreatWarningsAsErrors=true \
-                    /p:ContinuousIntegrationBuild=true \
-                    /p:Deterministic=true
+                  dotnet build MissionControl.sln -c Release --no-restore /p:TreatWarningsAsErrors=true /p:ContinuousIntegrationBuild=true /p:Deterministic=true
 
-                  echo "--> [Telemetry] Executing test suite with TRX and Coverage..."
                   mkdir -p /workspace/TestResults
                   dotnet test tests/MissionControl.Tests/MissionControl.Tests.csproj \
-                    -c Release \
-                    --no-build \
+                    -c Release --no-build \
                     --logger "trx;LogFileName=test_results.trx" \
-                    --results-directory /workspace/TestResults \
-                    --collect:"XPlat Code Coverage" \
-                    -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+                    --results-directory /workspace/TestResults
 
-                  echo "--> [SAST End] Publishing telemetry to SonarQube..."
                   dotnet-sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
 
-                  echo "--> [V&V Package] Generating framework-dependent binary release layout..."
                   rm -rf /workspace/publish_raw
-                  dotnet publish src/MissionControl.Api/MissionControl.Api.csproj \
-                    -c Release \
-                    --no-restore \
-                    -o /workspace/publish_raw \
-                    /p:ContinuousIntegrationBuild=true \
-                    /p:UseAppHost=false
+                  dotnet publish src/MissionControl.Api/MissionControl.Api.csproj -c Release --no-restore -o /workspace/publish_raw /p:ContinuousIntegrationBuild=true /p:UseAppHost=false
 
-                  # Restore workspace file ownership to host runner user
                   chown -R '"${HOST_UID}:${HOST_GID}"' /workspace
                 '
             displayName: 'Containerized .NET Build, Test & SAST'
             env:
-              SONAR_TOKEN: $(SONAR_TOKEN) # Mapped from Azure Pipeline Secret Library
+              # CRITICAL: These must match your Azure DevOps Pipeline Variables / Variable Groups exactly
               NEXUS_USER: $(NEXUS_USER)
               NEXUS_PASS: $(NEXUS_PASS)
+              SONAR_TOKEN: $(SONAR_TOKEN)          
 
           - task: PublishTestResults@2
             displayName: 'Publish VSTest TRX Results'
