@@ -1,0 +1,253 @@
+=============================================================================
+# AZURE DEVOPS PIPELINE FOR GITHUB REPOSITORY
+# Repo: https://github.com/opstime-labs/mission-control
+# Runner Pool: Homelab Ubuntu Mini PC (10.0.0.182)
+# =============================================================================
+
+name: $(Date:yyyyMMdd)$(Rev:.r)-$(Build.SourceBranchName)
+
+resources:
+  repositories:
+    - repository: mission_control_gh
+      type: github
+      endpoint: github-opstime-connection # Name of Service Connection created in Step 1
+      name: opstime-labs/mission-control
+      ref: refs/heads/main
+
+trigger:
+  branches:
+    include:
+      - main
+      - master
+      - feature/*
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+
+variables:
+  - name: CI_CONTROLLER_HOST
+    value: '10.0.0.182'
+  - name: SIL_TARGET_HOST
+    value: '10.0.0.163'
+  - name: INGRESS_PORT
+    value: '8085'
+  - name: REGISTRY_HOST
+    value: 'nexus.homelab.local:8082'
+  - name: IMAGE_NAME
+    value: 'mission-control/sensor-gateway'
+  - name: DOTNET_CLI_TELEMETRY_OPTOUT
+    value: '1'
+
+pool:
+  name: 'Default' # Name of your self-hosted agent pool on the Ubuntu Mini PC
+
+stages:
+  # =========================================================================
+  # STAGE 1: TRACEABILITY & IEEE 828 AUDIT GATE
+  # =========================================================================
+  - stage: AuditGate
+    displayName: 'Audit & Traceability Gate'
+    jobs:
+      - job: ValidateJiraKey
+        displayName: 'Assert Jira Traceability'
+        steps:
+          - checkout: self
+            fetchDepth: 50
+
+          - bash: |
+              set -euo pipefail
+              echo "=== [STAGE 1] ASSERTING JIRA TRACEABILITY BASELINE ==="
+              COMMIT_MSG=$(git log -1 --pretty=%B)
+              BRANCH_NAME="$(Build.SourceBranchName)"
+              echo "Inspecting Commit: ${COMMIT_MSG}"
+              echo "Inspecting Branch: ${BRANCH_NAME}"
+
+              JIRA_REGEX="(?i)([A-Z]{2,10}-[0-9]+)"
+              if [[ "${COMMIT_MSG}" =~ ${JIRA_REGEX} ]]; then
+                JIRA_KEY=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
+              elif [[ "${BRANCH_NAME}" =~ ${JIRA_REGEX} ]]; then
+                JIRA_KEY=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
+              else
+                JIRA_KEY="DRS-12"
+                echo "##vso[task.logissue type=warning]No Jira key detected. Falling back to default: ${JIRA_KEY}"
+              fi
+
+              SHORT_SHA=$(git rev-parse --short=7 HEAD)
+              TARGET_TAG="$(Build.BuildId)-${SHORT_SHA}"
+
+              echo "Resolved Jira Key: ${JIRA_KEY}"
+              echo "Calculated Target Tag: ${TARGET_TAG}"
+
+              # Export output variables for downstream stages
+              echo "##vso[task.setvariable variable=JIRA_KEY;isOutput=true]${JIRA_KEY}"
+              echo "##vso[task.setvariable variable=TARGET_RELEASE_TAG;isOutput=true]${TARGET_TAG}"
+            name: AuditVars
+            displayName: 'Extract Commit & Jira Metadata'
+
+  # =========================================================================
+  # STAGE 2: BUILD, TEST & SAST QUALITY GATE (.NET 10)
+  # =========================================================================
+  - stage: BuildAndTest
+    displayName: 'Compile, Test & SAST Gate'
+    dependsOn: AuditGate
+    jobs:
+      - job: DotNetBuild
+        displayName: 'Deterministic Compilation & SonarQube'
+        steps:
+          - checkout: self
+
+          - bash: |
+              set -euo pipefail
+              echo "=== [STAGE 2] DETERMINISTIC RESTORE & COMPILATION ==="
+              # Execute inside the hardened builder container
+              docker run --rm \
+                --network host \
+                -v "$(Build.SourcesDirectory):/workspace" \
+                -w /workspace \
+                -e ContinuousIntegrationBuild=true \
+                -e TreatWarningsAsErrors=true \
+                nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r1 \
+                bash -c '
+                  set -euo pipefail
+                  chmod -R a+rx /usr/local/bin/.store 2>/dev/null || true
+                  dotnet restore src/MissionControl.Api/MissionControl.Api.csproj --configfile nuget.config --locked-mode
+                  dotnet build src/MissionControl.Api/MissionControl.Api.csproj -c Release --no-restore /p:TreatWarningsAsErrors=true /p:ContinuousIntegrationBuild=true
+                  dotnet test tests/MissionControl.Tests/MissionControl.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test_results.trx"
+                  chown -R '$(id -u):$(id -g)' /workspace
+                '
+            displayName: 'Execute Containerized .NET Build'
+
+          - task: PublishTestResults@2
+            displayName: 'Publish VSTest TRX Results'
+            inputs:
+              testResultsFormat: 'VSTest'
+              testResultsFiles: '**/test_results.trx'
+              failTaskOnFailedTests: true
+
+  # =========================================================================
+  # STAGE 3: PACKAGING & CONTAINER SECURITY GATE (TRIVY + NEXUS OCI)
+  # =========================================================================
+  - stage: SecurityAndPublish
+    displayName: 'Security Gating & Registry Push'
+    dependsOn: 
+      - AuditGate
+      - BuildAndTest
+    variables:
+      TARGET_RELEASE_TAG: $[ stageDependencies.AuditGate.ValidateJiraKey.outputs['AuditVars.TARGET_RELEASE_TAG'] ]
+    jobs:
+      - job: TrivyAndPush
+        displayName: 'Trivy CVE Scan & Nexus Export'
+        steps:
+          - checkout: self
+
+          - bash: |
+              set -euo pipefail
+              echo "=== [STAGE 4] BUILDING CANDIDATE IMAGE ==="
+              docker build \
+                -t $(REGISTRY_HOST)/$(IMAGE_NAME):$(TARGET_RELEASE_TAG) \
+                -f src/MissionControl.Api/Dockerfile .
+
+              echo "=== SCANNING WITH AQUASEC TRIVY ==="
+              docker run --rm \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                aquasec/trivy:latest image \
+                --severity HIGH,CRITICAL \
+                --exit-code 1 \
+                $(REGISTRY_HOST)/$(IMAGE_NAME):$(TARGET_RELEASE_TAG)
+
+              echo "Trivy CVE scan passed: Zero high/critical vulnerabilities found."
+            displayName: 'Container Build & CVE Gate'
+
+          - bash: |
+              set -euo pipefail
+              echo "=== PUSHING TO PRIVATE NEXUS OCI REGISTRY ==="
+              docker push $(REGISTRY_HOST)/$(IMAGE_NAME):$(TARGET_RELEASE_TAG)
+            displayName: 'Push Verified Digest to Nexus'
+            condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/main', 'refs/heads/master'))
+
+  # =========================================================================
+  # STAGES 5 & 6: V&V ENVIRONMENT APPROVAL & HARDWARE CUTOVER
+  # =========================================================================
+  - stage: DeployToSIL
+    displayName: 'SIL Target Hardware Cutover'
+    dependsOn:
+      - AuditGate
+      - SecurityAndPublish
+    condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/main', 'refs/heads/master'))
+    variables:
+      TARGET_RELEASE_TAG: $[ stageDependencies.AuditGate.ValidateJiraKey.outputs['AuditVars.TARGET_RELEASE_TAG'] ]
+    jobs:
+      # In Azure DevOps, deployment jobs bind directly to Environments for Manual Approval Gates
+      - deployment: SILDeployment
+        displayName: 'Ansible Blue/Green Cutover'
+        environment: 'production-sil' # Configure manual approvals & wait timers here in Azure DevOps UI
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - bash: |
+                    set -euo pipefail
+                    echo "=== [STAGE 5 & 6] EXECUTING ANSIBLE CUTOVER ON SIL NODE ==="
+                    
+                    # Prepare transient SSH credentials safely
+                    SSH_KEY_TMP=$(mktemp)
+                    echo "$DEPLOYER_SSH_KEY" > "${SSH_KEY_TMP}"
+                    chmod 600 "${SSH_KEY_TMP}"
+                    trap 'shred -u -z -n 3 "${SSH_KEY_TMP}"' EXIT INT TERM
+
+                    docker run --rm \
+                      --network host \
+                      -v "$(Build.SourcesDirectory):/workspace" \
+                      -v "${SSH_KEY_TMP}:/root/.ssh/id_ed25519:ro" \
+                      -w /workspace \
+                      alpine/ansible:latest \
+                      ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
+                        --extra-vars "target_tag=$(TARGET_RELEASE_TAG) ingress_port=$(INGRESS_PORT)"
+                  displayName: 'Deploy via Ansible'
+                  env:
+                    DEPLOYER_SSH_KEY: $(DEPLOYER_PRIVATE_KEY) # Pulled from Azure DevOps Secret Variables
+
+  # =========================================================================
+  # STAGE 7: INGRESS HEALTH PROBE & AUTOMATED RECOVERY LADDER
+  # =========================================================================
+  - stage: VerifyAndRecover
+    displayName: 'Ingress Verification & Recovery Ladder'
+    dependsOn: DeployToSIL
+    condition: and(succeeded(), in(variables['Build.SourceBranch'], 'refs/heads/main', 'refs/heads/master'))
+    jobs:
+      - job: IngressProbe
+        displayName: 'HTTP Probe & Fallback Rollback'
+        steps:
+          - checkout: self
+
+          - bash: |
+              set -euo pipefail
+              echo "=== [STAGE 7] POLLING INGRESS ENDPOINT: http://$(SIL_TARGET_HOST):$(INGRESS_PORT)/health ==="
+              
+              MAX_ATTEMPTS=5
+              ATTEMPT=1
+              HEALTHY=0
+
+              until [ $ATTEMPT -gt $MAX_ATTEMPTS ]; do
+                echo "Readiness probe attempt $ATTEMPT/$MAX_ATTEMPTS..."
+                if curl -s -f --connect-timeout 2 --max-time 4 "http://$(SIL_TARGET_HOST):$(INGRESS_PORT)/health"; then
+                  echo -e "\nIngress health verified successfully on port $(INGRESS_PORT)."
+                  HEALTHY=1
+                  break
+                fi
+                sleep 3
+                ATTEMPT=$((ATTEMPT + 1))
+              done
+
+              if [ $HEALTHY -ne 1 ]; then
+                echo "CRITICAL: Health probe failed! Initiating automated recovery ladder..."
+                ansible-playbook -i ansible/inventory.ini ansible/rollback.yml || \
+                ansible-playbook -i ansible/inventory.ini ansible/fail_safe.yml
+                exit 1
+              fi
+            displayName: 'Verify Ingress Health'

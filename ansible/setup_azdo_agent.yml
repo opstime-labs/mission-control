@@ -1,0 +1,76 @@
+---
+# ==========================================================
+# Ansible Playbook: setup_azdo_agent.yml
+# Command line usage:
+# source .env && ansible-playbook -i ansible/inventory.ini ansible/setup_azdo_agent.yml \
+#  --private-key ~/.ssh/id_ed25519 \
+#  -K
+# ==========================================================
+- name: Provision Azure DevOps Self-Hosted Agent
+  hosts: ci_controller
+  become: false
+
+  vars:
+    agent_version: "5.281.0"
+    agent_user: "{{ ansible_user_id }}"
+    agent_dir: "{{ ansible_user_dir }}/azdo-agent"
+    # Organization URL (override in .env or vars/vault)
+    azdo_org_url: "https://dev.azure.com/opstime-labs"
+    azdo_pool_name: "Default"
+    azdo_agent_name: "{{ inventory_hostname }}-azdo-agent"
+
+  tasks:
+    - name: Create agent directory
+      ansible.builtin.file:
+        path: "{{ agent_dir }}"
+        state: directory
+        mode: '0755'
+
+
+    - name: Download and unpack Azure DevOps Agent release
+      ansible.builtin.unarchive:              
+        src: "https://download.agent.dev.azure.com/agent/{{ agent_version }}/vsts-agent-linux-x64-{{ agent_version }}.tar.gz"
+        dest: "{{ agent_dir }}"
+        remote_src: yes
+        creates: "{{ agent_dir }}/config.sh"
+
+    - name: Check if agent is already configured
+      ansible.builtin.stat:
+        path: "{{ agent_dir }}/.agent"
+      register: agent_configured
+
+    - name: Configure agent with Azure DevOps organization pool
+      ansible.builtin.command:
+        cmd: >
+          ./config.sh
+          --unattended
+          --url "{{ azdo_org_url }}"
+          --auth pat
+          --token "{{ azdo_runner_registration_token }}"
+          --pool "{{ azdo_pool_name }}"
+          --agent "{{ azdo_agent_name }}"
+          --work "_work"
+          --replace
+          --acceptTeeEula
+        chdir: "{{ agent_dir }}"
+      when: not agent_configured.stat.exists
+
+    - name: Check systemd service installation
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/vsts.agent.{{ azdo_org_url | regex_replace('^https://dev\\.azure\\.com/', '') | regex_replace('/', '.') }}.{{ azdo_agent_name }}.service"
+      register: service_installed
+
+    - name: Install systemd service via svc.sh
+      become: true
+      ansible.builtin.command:
+        cmd: "./svc.sh install {{ agent_user }}"
+        chdir: "{{ agent_dir }}"
+      when: not service_installed.stat.exists
+
+    - name: Start agent service
+      become: true
+      ansible.builtin.command:
+        cmd: "./svc.sh start"
+        chdir: "{{ agent_dir }}"
+      register: svc_start
+      changed_when: "'already running' not in svc_start.stdout"
