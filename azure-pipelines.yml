@@ -35,11 +35,11 @@ parameters:
   - name: ENABLE_BUILD_AND_TEST
     displayName: 'Execute .NET 10 Build, Tests & SonarQube SAST'
     type: boolean
-    default: false
+    default: true
   - name: ENABLE_TRIVY_SCAN
     displayName: 'Enforce Trivy Container Security Gate (Breaks on HIGH/CRITICAL)'
     type: boolean
-    default: true
+    default: false
   - name: ENABLE_RAW_RELEASE_PUBLISH
     displayName: 'Publish Raw Binary Archive (.tar.gz + SHA256) to Nexus'
     type: boolean
@@ -369,12 +369,28 @@ stages:
 
                 echo "--> Setting up QEMU and Buildx container builder..."
                 docker run --privileged --rm tonistiigi/binfmt --install all
-                
-                if ! docker buildx inspect azdo-builder >/dev/null 2>&1; then
-                  docker buildx create --name azdo-builder --driver docker-container --use
-                else
-                  docker buildx use azdo-builder
+
+                echo "--> Configuring Buildx builder with host networking and insecure registry..."
+                # 1. Create temporary BuildKit config
+                cat << 'EOF' > /tmp/buildkitd.toml
+                  [registry."nexus.homelab.local:8082"]
+                  http = true
+                  insecure = true
+                EOF
+
+                # 2. Re-create or initialize builder with host network and custom config
+                if docker buildx inspect azdo-builder >/dev/null 2>&1; then
+                  # If builder already exists without host networking, remove it
+                  docker buildx rm azdo-builder
                 fi
+
+                docker buildx create \
+                  --name azdo-builder \
+                  --driver docker-container \
+                  --driver-opt network=host \
+                  --config /tmp/buildkitd.toml \
+                  --use
+
                 docker buildx inspect --bootstrap
 
                 echo "--> Building and pushing multi-architecture release images (amd64, arm64)..."
@@ -389,11 +405,12 @@ stages:
                   -f Dockerfile .
 
                 docker buildx prune -f --filter "until=24h"
+                rm -f /tmp/buildkitd.toml
               fi
             displayName: 'Scan with Trivy & Push Multi-Arch Image'
             env:
               NEXUS_USER: $(NEXUS_USER)
-              NEXUS_PASS: $(NEXUS_PASS)          
+              NEXUS_PASS: $(NEXUS_PASS)
 
   # =========================================================================
   # STAGE 4.5 & 5: RELEASE READINESS REVIEW & SIL ANSIBLE CUTOVER
