@@ -248,6 +248,12 @@ stages:
               NEXUS_PASS: $(NEXUS_PASS)
               SONAR_TOKEN: $(SONAR_TOKEN)          
 
+          - task: PublishPipelineArtifact@1
+            displayName: 'Stash Raw Publish Output'
+            inputs:
+              targetPath: '$(Build.SourcesDirectory)/publish_raw'
+              artifact: 'publish_raw'
+
           - task: PublishTestResults@2
             displayName: 'Publish VSTest TRX Results'
             condition: always()
@@ -273,6 +279,12 @@ stages:
         displayName: 'Package Tarball & Push to Nexus'
         steps:
           - checkout: self
+
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Fetch Raw Publish Output'
+            inputs:
+              artifact: 'publish_raw'
+              path: '$(Build.SourcesDirectory)/publish_raw'
 
           - bash: |
               set -euo pipefail
