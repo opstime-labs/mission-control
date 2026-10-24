@@ -334,7 +334,7 @@ stages:
         displayName: 'Trivy Scan & Nexus Multi-Arch Push'
         steps:
           - checkout: self
-
+          
           - bash: |
               set -euo pipefail
               LOCAL_SCAN_TAG="$(IMAGE_NAME):scan-$(Build.BuildId)"
@@ -367,8 +367,19 @@ stages:
                 echo "$NEXUS_PASS" | docker login -u "$NEXUS_USER" --password-stdin "$(REGISTRY_HOST)"
                 trap 'docker logout "$(REGISTRY_HOST)"' EXIT
 
+                echo "--> Setting up QEMU and Buildx container builder..."
+                docker run --privileged --rm tonistiami/binfmt --install all
+                
+                if ! docker buildx inspect azdo-builder >/dev/null 2>&1; then
+                  docker buildx create --name azdo-builder --driver docker-container --use
+                else
+                  docker buildx use azdo-builder
+                fi
+                docker buildx inspect --bootstrap
+
                 echo "--> Building and pushing multi-architecture release images (amd64, arm64)..."
                 docker buildx build \
+                  --builder azdo-builder \
                   --platform linux/amd64,linux/arm64 \
                   --build-arg BUILD_NUMBER=$(Build.BuildId) \
                   --build-arg GIT_COMMIT=$(SHORT_SHA) \
@@ -377,12 +388,12 @@ stages:
                   --push \
                   -f Dockerfile .
 
-                docker builder prune -f --filter "until=24h"
+                docker buildx prune -f --filter "until=24h"
               fi
             displayName: 'Scan with Trivy & Push Multi-Arch Image'
             env:
               NEXUS_USER: $(NEXUS_USER)
-              NEXUS_PASS: $(NEXUS_PASS)
+              NEXUS_PASS: $(NEXUS_PASS)          
 
   # =========================================================================
   # STAGE 4.5 & 5: RELEASE READINESS REVIEW & SIL ANSIBLE CUTOVER

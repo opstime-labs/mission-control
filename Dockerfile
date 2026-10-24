@@ -1,24 +1,20 @@
 # Stage 1: Build & Publish via .NET 10 SDK
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
-ARG TARGETARCH
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
 WORKDIR /src
 
 COPY Directory.Build.props nuget.config ./
 COPY src/MissionControl.Api/MissionControl.Api.csproj src/MissionControl.Api/
 COPY src/MissionControl.Api/packages.lock.json src/MissionControl.Api/
 
-# Restore platform-agnostically so it matches packages.lock.json
 RUN dotnet restore src/MissionControl.Api/MissionControl.Api.csproj \
     --configfile nuget.config \
     --locked-mode
 
 COPY src/MissionControl.Api/ src/MissionControl.Api/
 WORKDIR /src/src/MissionControl.Api
-
-# Cross-compile to the target architecture (amd64 / arm64)
 RUN dotnet publish MissionControl.Api.csproj \
     -c Release \
-    -a $TARGETARCH \
+    --no-restore \
     -o /app/publish \
     /p:ContinuousIntegrationBuild=true \
     /p:UseAppHost=false
