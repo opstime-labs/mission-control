@@ -462,7 +462,8 @@ stages:
                     KEY_TMP="./id_rsa_deploy"
                     VAULT_TMP="./vault_pass_tmp"
 
-                    echo "$SIL_SSH_KEY" > "${KEY_TMP}"
+                    # Decode base64 into the valid PEM private key file
+                    echo "$SIL_SSH_KEY" | base64 -d > "${KEY_TMP}"
                     echo "$VAULT_PASS" > "${VAULT_TMP}"
                     chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
                     trap 'shred -u -z -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
