@@ -1,25 +1,33 @@
 # Stage 1: Build & Publish via .NET 10 SDK
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+# Run SDK natively on the builder host's platform
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+ARG TARGETARCH
 WORKDIR /src
 
 COPY Directory.Build.props nuget.config ./
 COPY src/MissionControl.Api/MissionControl.Api.csproj src/MissionControl.Api/
 COPY src/MissionControl.Api/packages.lock.json src/MissionControl.Api/
 
+# Restore packages targeting the destination architecture natively
 RUN dotnet restore src/MissionControl.Api/MissionControl.Api.csproj \
     --configfile nuget.config \
-    --locked-mode
+    --locked-mode \
+    -a $TARGETARCH
 
 COPY src/MissionControl.Api/ src/MissionControl.Api/
 WORKDIR /src/src/MissionControl.Api
+
+# Cross-compile for the destination architecture natively
 RUN dotnet publish MissionControl.Api.csproj \
     -c Release \
     --no-restore \
+    -a $TARGETARCH \
     -o /app/publish \
     /p:ContinuousIntegrationBuild=true \
     /p:UseAppHost=false
 
 # Stage 2: Distroless Chiseled Runtime (.NET 10)
+# Automatically targets the respective destination platform (amd64 or arm64)
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled AS final
 WORKDIR /app
 
