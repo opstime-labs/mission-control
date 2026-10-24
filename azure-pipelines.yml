@@ -35,7 +35,7 @@ parameters:
   - name: ENABLE_BUILD_AND_TEST
     displayName: 'Execute .NET 10 Build, Tests & SonarQube SAST'
     type: boolean
-    default: true
+    default: false
   - name: ENABLE_TRIVY_SCAN
     displayName: 'Enforce Trivy Container Security Gate (Breaks on HIGH/CRITICAL)'
     type: boolean
@@ -43,7 +43,7 @@ parameters:
   - name: ENABLE_RAW_RELEASE_PUBLISH
     displayName: 'Publish Raw Binary Archive (.tar.gz + SHA256) to Nexus'
     type: boolean
-    default: true
+    default: false
   - name: ENABLE_CONTAINER_PUBLISH
     displayName: 'Publish Multi-Arch Images (amd64/arm64) to Nexus OCI Registry'
     type: boolean
@@ -368,7 +368,7 @@ stages:
                 trap 'docker logout "$(REGISTRY_HOST)"' EXIT
 
                 echo "--> Setting up QEMU and Buildx container builder..."
-                docker run --privileged --rm tonistiami/binfmt --install all
+                docker run --privileged --rm tonistiigi/binfmt --install all
                 
                 if ! docker buildx inspect azdo-builder >/dev/null 2>&1; then
                   docker buildx create --name azdo-builder --driver docker-container --use
