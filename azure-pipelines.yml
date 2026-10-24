@@ -372,11 +372,7 @@ stages:
 
                 echo "--> Configuring Buildx builder with host networking and insecure registry..."
                 # 1. Create temporary BuildKit config
-                cat << 'EOF' > /tmp/buildkitd.toml
-                [registry."nexus.homelab.local:8082"]
-                http = true
-                insecure = true
-                EOF
+                printf '[registry."nexus.homelab.local:8082"]\nhttp = true\ninsecure = true\n' > /tmp/buildkitd.toml
 
                 # 2. Re-create or initialize builder with host network and custom config
                 if docker buildx inspect azdo-builder >/dev/null 2>&1; then
