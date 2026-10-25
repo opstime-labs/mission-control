@@ -4,3 +4,4 @@ ansible_user: "{{ lookup('env', 'ANSIBLE_MINI_PC_USER') | default('runner', true
 runner_dir: "{{ lookup('env', 'ANSIBLE_MINI_PC_USER_DIR') | default('/home/runner', true) }}"
 github_runner_registration_token: "{{ lookup('env', 'GITHUB_RUNNER_REGISTRATION_TOKEN') | default('', true) }}"
 azdo_runner_registration_token: "{{ lookup('env', 'AZDO_RUNNER_REGISTRATION_TOKEN') | default('', true) }}"
+gitlab_runner_registration_token: "{{ lookup('env', 'GITLAB_RUNNER_REGISTRATION_TOKEN') | default('', true) }}"
