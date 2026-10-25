@@ -1,0 +1,303 @@
+# ==============================================================================
+# GITLAB CI/CD PIPELINE: MISSIONCONTROL
+# Client Context: Leonardo DRS Systems Integration Lab (SIL) Emulation
+# Standards: IEEE 828-2012 Configuration Baselines & Controlled Goods (CGP)
+# Self-Hosted Runner: Ubuntu Mini PC (10.0.0.182)
+# ==============================================================================
+
+stages:
+  - audit
+  - build_and_test
+  - publish_raw
+  - container_gate
+  - release_readiness
+  - deploy_sil
+  - verify_and_recover
+  - audit_summary
+
+# ==============================================================================
+# PIPELINE PARAMETERS (GitLab UI Form Controls & Default Baselines)
+# ==============================================================================
+variables:
+  # 1. Verification & Security Gating Parameters
+  ENABLE_BUILD_AND_TEST:
+    value: "true"
+    options:
+      - "true"
+      - "false"
+    description: "Compile .NET solution, enforce zero warnings, execute TRX test suite, and run SonarQube SAST"
+
+  ENABLE_TRIVY_SCAN:
+    value: "false"
+    options:
+      - "true"
+      - "false"
+    description: "Execute Trivy container vulnerability scan (Hard gate: breaks pipeline on HIGH or CRITICAL CVEs)"
+
+  ENABLE_INGRESS_HEALTH_CHECK:
+    value: "true"
+    options:
+      - "true"
+      - "false"
+    description: "Verify service ingress readiness on port 8085 and trigger automated recovery ladder on failure"
+
+  # 2. Artifact Packaging & Registry Promotion Parameters
+  ENABLE_RAW_RELEASE_PUBLISH:
+    value: "false"
+    options:
+      - "true"
+      - "false"
+    description: "Package framework-dependent binary archive (.tar.gz) and SHA-256 digest to Nexus raw-hosted"
+
+  ENABLE_CONTAINER_PUBLISH:
+    value: "true"
+    options:
+      - "true"
+      - "false"
+    description: "Build and push multi-architecture (amd64/arm64) Ubuntu Chiseled OCI image to Nexus registry"
+
+  # 3. Controlled SIL Deployment Strategy Parameters
+  DEPLOY_STRATEGY:
+    value: "ANSIBLE"
+    options:
+      - "ANSIBLE"
+      - "STANDALONE_SSH"
+      - "SKIP"
+    description: "Orchestration mechanism for targeting the physical SIL hardware node"
+
+  # 4. Infrastructure Topology & Audit Endpoints
+  DEPLOY_TARGET_HOST:
+    value: "10.0.0.163"
+    description: "Physical IP or FQDN of the target SIL node (Raspberry Pi 400)"
+
+  INGRESS_PORT:
+    value: "8085"
+    description: "Unprivileged NGINX reverse-proxy ingress listener port on target SIL node"
+
+  HEALTH_CHECK_ENDPOINT:
+    value: "/health"
+    description: "Health check endpoint path for ingress verification"
+
+  # 5. Core Build Mechanics & Internal Coordinates
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+  DOTNET_NOLOGO: "true"
+  NUGET_XMLDOC_MODE: "skip"
+  ContinuousIntegrationBuild: "true"
+
+  REGISTRY_HOST: "nexus.homelab.local:8082"
+  IMAGE_NAME: "mission-control/sensor-gateway"
+  NEXUS_RAW_BASE: "http://10.0.0.182:8081/repository/raw-hosted"
+  DOTNET_BUILDER_IMAGE: "nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r1"
+  SONAR_HOST_URL: "http://10.0.0.182:9000"
+  SONAR_PROJECT_KEY: "mission-control-api"
+  JIRA_API_URL: "https://cp4learning.atlassian.net/rest/api/2/issue"
+
+  DEPLOY_SIL_AGENT_NAME: "sil-agent-01"
+  DEPLOY_HOST_USER: "deployer"
+
+default:
+  tags:
+    - self-hosted
+    - homelab
+
+# ==============================================================================
+# STAGE 1: TRACEABILITY & IEEE 828 AUDIT GATE
+# ==============================================================================
+stage_1_audit_gate:
+  stage: audit
+  script:
+    - set -euo pipefail
+    - echo "=== [STAGE 1] ASSERTING JIRA TRACEABILITY BASELINE ==="
+    - COMMIT_LOGS=$(git log -5 --pretty=%B)
+    - SEARCH_STR="${CI_COMMIT_REF_NAME}${COMMIT_LOGS}"
+    - |
+      if [[ "${SEARCH_STR}" =~ ([A-Za-z]{2,10}-[0-9]+) ]]; then
+        JIRA_KEY=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
+        echo "Traceability Audit Gate: PASSED"
+        echo "Resolved Jira Work Item: ${JIRA_KEY}"
+      else
+        echo "CONFIGURATION AUDIT FAILURE: No Jira issue key found. Controlled Goods and IEEE 828 standards mandate an active tracking ticket." >&2
+        exit 1
+      fi
+    - SHORT_SHA=$(git rev-parse --short=7 HEAD)
+    - TARGET_TAG="${CI_PIPELINE_IID}-${SHORT_SHA}"
+    - echo "JIRA_KEY=${JIRA_KEY}" >> pipeline.env
+    - echo "SHORT_SHA=${SHORT_SHA}" >> pipeline.env
+    - echo "TARGET_RELEASE_TAG=${TARGET_TAG}" >> pipeline.env
+    - echo "DEPLOY_HOST_IP=${DEPLOY_TARGET_HOST}" >> pipeline.env
+    - echo "INGRESS_PORT=${INGRESS_PORT}" >> pipeline.env
+    - echo "HEALTH_CHECK_ENDPOINT=${HEALTH_CHECK_ENDPOINT}" >> pipeline.env
+  artifacts:
+    reports:
+      dotenv: pipeline.env
+
+# ==============================================================================
+# STAGE 2: .NET 10 RESTORE, BUILD, TEST & SONARQUBE SAST
+# ==============================================================================
+stage_2_build_and_test:
+  stage: build_and_test
+  needs: [stage_1_audit_gate]
+  rules:
+    - if: '$ENABLE_BUILD_AND_TEST == "true"'
+  script:
+    - set -euo pipefail
+    - echo "=== [STAGE 2] DETERMINISTIC RESTORE, BUILD & SAST ==="
+    - echo "$NEXUS_PASS" | docker login -u "$NEXUS_USER" --password-stdin "$REGISTRY_HOST"
+    - trap 'docker logout "$REGISTRY_HOST" 2>/dev/null || true' EXIT
+    - HOST_UID=$(id -u)
+    - HOST_GID=$(id -g)
+    - |
+      docker run --rm \
+        --user root \
+        --network host \
+        -v "$CI_PROJECT_DIR:/workspace" \
+        -w /workspace \
+        --tmpfs /tmp:rw,exec,nosuid,size=2048m \
+        -e HOME=/tmp \
+        -e DOTNET_CLI_HOME=/tmp/.dotnet \
+        -e NUGET_PACKAGES=/tmp/.nuget/packages \
+        -e PATH="/usr/local/bin:/usr/bin:/bin" \
+        -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+        -e ContinuousIntegrationBuild=true \
+        -e SONAR_TOKEN="${SONAR_TOKEN}" \
+        -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
+        -e SONAR_PROJECT_KEY="${SONAR_PROJECT_KEY}" \
+        "$DOTNET_BUILDER_IMAGE" \
+        bash -c '
+          set -euo pipefail
+          chmod -R a+rx /usr/local/bin/.store/dotnet-sonarscanner 2>/dev/null || true
+
+          echo "--> Restoring dependencies in locked mode..."
+          dotnet restore MissionControl.sln --locked-mode --configfile nuget.config
+
+          echo "--> Initializing SonarQube Scanner hook..."
+          dotnet-sonarscanner begin \
+            /k:"${SONAR_PROJECT_KEY}" \
+            /d:sonar.host.url="${SONAR_HOST_URL}" \
+            /d:sonar.token="${SONAR_TOKEN}" \
+            /d:sonar.cs.vstest.reportsPaths="/workspace/TestResults/*.trx" \
+            /d:sonar.cs.opencover.reportsPaths="/workspace/TestResults/**/coverage.opencover.xml" \
+            /d:sonar.qualitygate.wait=true \
+            /d:sonar.scanner.scanAll=false
+
+          echo "--> Compiling with zero warnings and deterministic flags..."
+          dotnet build MissionControl.sln -c Release --no-restore /p:TreatWarningsAsErrors=true /p:ContinuousIntegrationBuild=true /p:Deterministic=true
+
+          echo "--> Executing test suite with TRX and Coverage..."
+          mkdir -p /workspace/TestResults
+          dotnet test tests/MissionControl.Tests/MissionControl.Tests.csproj \
+            -c Release \
+            --no-build \
+            --logger "trx;LogFileName=test_results.trx" \
+            --results-directory /workspace/TestResults \
+            --collect:"XPlat Code Coverage" \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+          echo "--> Concluding SonarQube SAST evaluation..."
+          dotnet-sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+
+          echo "--> Packaging framework-dependent binary release layout..."
+          rm -rf /workspace/publish_raw
+          dotnet publish src/MissionControl.Api/MissionControl.Api.csproj -c Release --no-restore -o /workspace/publish_raw /p:ContinuousIntegrationBuild=true /p:UseAppHost=false
+
+          chown -R '"${HOST_UID}:${HOST_GID}"' /workspace
+        '
+  artifacts:
+    when: always
+    reports:
+      junit: TestResults/*.trx
+    paths:
+      - publish_raw/
+      - TestResults/*.trx
+    expire_in: 7 days
+
+# ==============================================================================
+# STAGE 3: PUBLISH RAW BINARY RELEASE ARCHIVE TO NEXUS
+# ==============================================================================
+stage_3_publish_raw:
+  stage: publish_raw
+  needs: [stage_1_audit_gate, stage_2_build_and_test]
+  rules:
+    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && $ENABLE_RAW_RELEASE_PUBLISH == "true"'
+  script:
+    - set -euo pipefail
+    - echo "=== [STAGE 3] PACKAGING RAW RELEASE BINARIES ==="
+    - RELEASE_DIR="$CI_PROJECT_DIR/release_dist"
+    - mkdir -p "${RELEASE_DIR}"
+    - ARTIFACT_NAME="mission-control-api-${TARGET_RELEASE_TAG}.tar.gz"
+    - CHECKSUM_NAME="${ARTIFACT_NAME}.sha256"
+    - tar -czf "${RELEASE_DIR}/${ARTIFACT_NAME}" -C "$CI_PROJECT_DIR/publish_raw" .
+    - cd "${RELEASE_DIR}"
+    - sha256sum "${ARTIFACT_NAME}" > "${CHECKSUM_NAME}"
+    - UPLOAD_URL="${NEXUS_RAW_BASE}/sensor-gateway/${CI_PIPELINE_IID}"
+    - echo "--> Uploading tarball to Nexus raw feed..."
+    - curl -s -f -u "$NEXUS_USER:$NEXUS_PASS" --upload-file "${ARTIFACT_NAME}" "${UPLOAD_URL}/${ARTIFACT_NAME}"
+    - echo "--> Uploading SHA-256 verification hash..."
+    - curl -s -f -u "$NEXUS_USER:$NEXUS_PASS" --upload-file "${CHECKSUM_NAME}" "${UPLOAD_URL}/${CHECKSUM_NAME}"
+
+# ==============================================================================
+# STAGE 4: CONTAINER SECURITY GATE & MULTI-ARCH PUBLISH
+# ==============================================================================
+stage_4_container_gate:
+  stage: container_gate
+  needs: [stage_1_audit_gate, stage_2_build_and_test]
+  rules:
+    - if: '$ENABLE_CONTAINER_PUBLISH == "true"'
+  script:
+    - set -euo pipefail
+    - LOCAL_SCAN_TAG="${IMAGE_NAME}:scan-${CI_PIPELINE_IID}"
+    - echo "--> Building candidate container with Chiseled runtime..."
+    - docker build --build-arg BUILD_NUMBER=${CI_PIPELINE_IID} --build-arg GIT_COMMIT=${SHORT_SHA} -t "${LOCAL_SCAN_TAG}" -f Dockerfile .
+    - |
+      if [ "$ENABLE_TRIVY_SCAN" = "true" ]; then
+        echo "--> [V&V Security Gate] Executing Aquasec Trivy scan (--exit-code 1)..."
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL --scanners vuln,secret --exit-code 1 --format table "${LOCAL_SCAN_TAG}"
+      fi
+    - docker rmi "${LOCAL_SCAN_TAG}" 2>/dev/null || true
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "main" ] \vert{}\vert{} [ "$CI_COMMIT_BRANCH" = "master" ]; then
+        echo "$NEXUS_PASS" | docker login -u "$NEXUS_USER" --password-stdin "$REGISTRY_HOST"
+        trap 'docker logout "$REGISTRY_HOST" 2>/dev/null || true' EXIT
+
+        echo "--> Setting up QEMU multi-architecture support..."
+        docker run --privileged --rm tonistiigi/binfmt --install all
+
+        printf '[registry."nexus.homelab.local:8082"]\nhttp = true\ninsecure = true\n' > /tmp/buildkitd.toml
+        if docker buildx inspect gitlab-builder >/dev/null 2>&1; then
+          docker buildx rm gitlab-builder
+        fi
+
+        docker buildx create --name gitlab-builder --driver docker-container --driver-opt network=host --config /tmp/buildkitd.toml --use
+        docker buildx inspect --bootstrap
+
+        echo "--> Building & publishing multi-arch images (amd64 + arm64)..."
+        docker buildx build \
+          --builder gitlab-builder \
+          --platform linux/amd64,linux/arm64 \
+          --build-arg BUILD_NUMBER=${CI_PIPELINE_IID} \
+          --build-arg GIT_COMMIT=${SHORT_SHA} \
+          -t "${REGISTRY_HOST}/${IMAGE_NAME}:${TARGET_RELEASE_TAG}" \
+          -t "${REGISTRY_HOST}/${IMAGE_NAME}:latest" \
+          --push \
+          -f Dockerfile .
+
+        docker buildx prune -f --filter "until=24h"
+        rm -f /tmp/buildkitd.toml
+      fi
+
+# ==============================================================================
+# STAGE 4.5: RELEASE READINESS REVIEW (MANUAL V&V GATE)
+# ==============================================================================
+stage_4_5_rrr_gate:
+  stage: release_readiness
+  needs: [stage_1_audit_gate, stage_4_container_gate]
+  rules:
+    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && $DEPLOY_STRATEGY != "SKIP"'
+      when: manual
+  script:
+    - set -euo pipefail
+    - echo "Release candidate ${TARGET_RELEASE_TAG} authorized by operator for SIL deployment."
+    - CURL_CONF=$(mktemp)
+    - chmod 600 "${CURL_CONF}"
+    - trap 'rm -f "${CURL_CONF}"' EXIT

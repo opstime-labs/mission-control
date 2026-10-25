@@ -1,0 +1,76 @@
+---
+# ==============================================================================
+# Ansible Playbook: setup_gitlab_runner.yml
+# Target Host: ci_controller (Ubuntu Ryzen 7 Mini PC - 10.0.0.182)
+# Usage:
+#   source .env && ansible-playbook -i ansible/inventory.ini ansible/setup_gitlab_runner.yml \
+#     --private-key ~/.ssh/id_ed25519 \
+#     -K
+# ==============================================================================
+- name: Provision Dedicated GitLab Self-Hosted Runner
+  hosts: ci_controller
+  become: false
+
+  vars:
+    gitlab_runner_version: "v17.5.1"
+    runner_user: "{{ ansible_user_id }}"
+    runner_home: "{{ ansible_user_dir }}"
+    gitlab_url: "https://gitlab.com/"
+    gitlab_runner_tags: "self-hosted,linux,x64,homelab,dotnet"
+    gitlab_runner_name: "{{ inventory_hostname }}-gitlab-runner"
+    gitlab_executor: "shell"
+
+  tasks:
+    - name: Download standalone GitLab Runner binary
+      become: true
+      ansible.builtin.get_url:
+        url: "https://gitlab-runner-downloads.s3.amazonaws.com/{{ gitlab_runner_version }}/binaries/gitlab-runner-linux-amd64"
+        dest: /usr/local/bin/gitlab-runner
+        mode: '0755'
+        force: false
+
+    - name: Ensure runner user is part of the docker group
+      become: true
+      ansible.builtin.user:
+        name: "{{ runner_user }}"
+        groups: docker
+        append: true
+
+    - name: Check if gitlab-runner systemd service is installed
+      ansible.builtin.stat:
+        path: /etc/systemd/system/gitlab-runner.service
+      register: gitlab_service_file
+
+    - name: Install gitlab-runner systemd service for runner user
+      become: true
+      ansible.builtin.command:
+        cmd: "gitlab-runner install --user {{ runner_user }} --working-directory {{ runner_home }}"
+      when: not gitlab_service_file.stat.exists
+
+    - name: Check if runner is already registered
+      ansible.builtin.command:
+        cmd: gitlab-runner list
+      register: registered_runners
+      changed_when: false
+
+    - name: Register GitLab Runner with target instance
+      ansible.builtin.command:
+        cmd: >
+          gitlab-runner register
+          --non-interactive
+          --url "{{ gitlab_url }}"
+          --token "{{ gitlab_runner_registration_token }}"
+          --name "{{ gitlab_runner_name }}"
+          --executor "{{ gitlab_executor }}"
+          --tag-list "{{ gitlab_runner_tags }}"
+          --run-untagged="true"
+          --locked="false"
+      when: gitlab_runner_name not in registered_runners.stderr and gitlab_runner_name not in registered_runners.stdout
+      no_log: true
+
+    - name: Ensure gitlab-runner service is enabled and active
+      become: true
+      ansible.builtin.systemd:
+        name: gitlab-runner
+        enabled: true
+        state: started
