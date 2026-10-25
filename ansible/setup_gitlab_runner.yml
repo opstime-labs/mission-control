@@ -2,10 +2,6 @@
 # ==============================================================================
 # Ansible Playbook: setup_gitlab_runner.yml
 # Target Host: ci_controller (Ubuntu Ryzen 7 Mini PC - 10.0.0.182)
-# Usage:
-#   source .env && ansible-playbook -i ansible/inventory.ini ansible/setup_gitlab_runner.yml \
-#     --private-key ~/.ssh/id_ed25519 \
-#     -K
 # ==============================================================================
 - name: Provision Dedicated GitLab Self-Hosted Runner
   hosts: ci_controller
@@ -16,7 +12,6 @@
     runner_user: "{{ ansible_user_id }}"
     runner_home: "{{ ansible_user_dir }}"
     gitlab_url: "https://gitlab.com/"
-    gitlab_runner_tags: "self-hosted,linux,x64,homelab,dotnet"
     gitlab_runner_name: "{{ inventory_hostname }}-gitlab-runner"
     gitlab_executor: "shell"
 
@@ -48,12 +43,14 @@
       when: not gitlab_service_file.stat.exists
 
     - name: Check if runner is already registered
+      become: true
       ansible.builtin.command:
         cmd: gitlab-runner list
       register: registered_runners
       changed_when: false
 
-    - name: Register GitLab Runner with target instance
+    - name: Register GitLab Runner with authentication token (glrt-...)
+      become: true
       ansible.builtin.command:
         cmd: >
           gitlab-runner register
@@ -62,15 +59,11 @@
           --token "{{ gitlab_runner_registration_token }}"
           --name "{{ gitlab_runner_name }}"
           --executor "{{ gitlab_executor }}"
-          --tag-list "{{ gitlab_runner_tags }}"
-          --run-untagged="true"
-          --locked="false"
       when: gitlab_runner_name not in registered_runners.stderr and gitlab_runner_name not in registered_runners.stdout
-      no_log: true
 
-    - name: Ensure gitlab-runner service is enabled and active
+    - name: Ensure gitlab-runner service is enabled and started
       become: true
       ansible.builtin.systemd:
         name: gitlab-runner
         enabled: true
-        state: started
+        state: restarted
