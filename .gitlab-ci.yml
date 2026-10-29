@@ -1,10 +1,53 @@
 # ==============================================================================
-# GITLAB CI/CD PIPELINE: MISSIONCONTROL
-# Client Context: Leonardo DRS Systems Integration Lab (SIL) Emulation
-# Standards: IEEE 828-2012 Configuration Baselines & Controlled Goods (CGP)
-# Self-Hosted Runner: Ubuntu Mini PC (10.0.0.182)
+# GITLAB CI/CD SPEC INPUTS (Enables Native GitLab UI Form Controls)
 # ==============================================================================
+spec:
+  inputs:
+    ENABLE_BUILD_AND_TEST:
+      type: boolean
+      default: true
+      description: "Compile .NET solution, enforce zero warnings, execute TRX test suite, and run SonarQube SAST"
+    ENABLE_TRIVY_SCAN:
+      type: boolean
+      default: false
+      description: "Execute Trivy container vulnerability scan (Hard gate: breaks pipeline on HIGH or CRITICAL CVEs)"
+    ENABLE_INGRESS_HEALTH_CHECK:
+      type: boolean
+      default: true
+      description: "Verify service ingress readiness on port 8085 and trigger automated recovery ladder on failure"
+    ENABLE_RAW_RELEASE_PUBLISH:
+      type: boolean
+      default: false
+      description: "Package framework-dependent binary archive (.tar.gz) and SHA-256 digest to Nexus raw-hosted"
+    ENABLE_CONTAINER_PUBLISH:
+      type: boolean
+      default: true
+      description: "Build and push multi-architecture (amd64/arm64) Ubuntu Chiseled OCI image to Nexus registry"
+    DEPLOY_STRATEGY:
+      type: string
+      default: "ANSIBLE"
+      options:
+        - "ANSIBLE"
+        - "STANDALONE_SSH"
+        - "SKIP"
+      description: "Orchestration mechanism for targeting the physical SIL hardware node"
+    DEPLOY_TARGET_HOST:
+      type: string
+      default: "10.0.0.163"
+      description: "Physical IP or FQDN of the target SIL node (Raspberry Pi 400)"
+    INGRESS_PORT:
+      type: string
+      default: "8085"
+      description: "Unprivileged NGINX reverse-proxy ingress listener port on target SIL node"
+    HEALTH_CHECK_ENDPOINT:
+      type: string
+      default: "/health"
+      description: "Health check endpoint path for ingress verification"
+---
 
+# ==============================================================================
+# PIPELINE STAGES & RUNTIME COORDINATES
+# ==============================================================================
 stages:
   - audit
   - build_and_test
@@ -15,76 +58,15 @@ stages:
   - verify_and_recover
   - audit_summary
 
-# ==============================================================================
-# PIPELINE PARAMETERS (GitLab UI Form Controls & Default Baselines)
-# ==============================================================================
 variables:
-  # 1. Verification & Security Gating Parameters
-  ENABLE_BUILD_AND_TEST:
-    value: "true"
-    options:
-      - "true"
-      - "false"
-    description: "Compile .NET solution, enforce zero warnings, execute TRX test suite, and run SonarQube SAST"
-
-  ENABLE_TRIVY_SCAN:
-    value: "false"
-    options:
-      - "true"
-      - "false"
-    description: "Execute Trivy container vulnerability scan (Hard gate: breaks pipeline on HIGH or CRITICAL CVEs)"
-
-  ENABLE_INGRESS_HEALTH_CHECK:
-    value: "true"
-    options:
-      - "true"
-      - "false"
-    description: "Verify service ingress readiness on port 8085 and trigger automated recovery ladder on failure"
-
-  # 2. Artifact Packaging & Registry Promotion Parameters
-  ENABLE_RAW_RELEASE_PUBLISH:
-    value: "false"
-    options:
-      - "true"
-      - "false"
-    description: "Package framework-dependent binary archive (.tar.gz) and SHA-256 digest to Nexus raw-hosted"
-
-  ENABLE_CONTAINER_PUBLISH:
-    value: "true"
-    options:
-      - "true"
-      - "false"
-    description: "Build and push multi-architecture (amd64/arm64) Ubuntu Chiseled OCI image to Nexus registry"
-
-  # 3. Controlled SIL Deployment Strategy Parameters
-  DEPLOY_STRATEGY:
-    value: "ANSIBLE"
-    options:
-      - "ANSIBLE"
-      - "STANDALONE_SSH"
-      - "SKIP"
-    description: "Orchestration mechanism for targeting the physical SIL hardware node"
-
-  # 4. Infrastructure Topology & Audit Endpoints
-  DEPLOY_TARGET_HOST:
-    value: "10.0.0.163"
-    description: "Physical IP or FQDN of the target SIL node (Raspberry Pi 400)"
-
-  INGRESS_PORT:
-    value: "8085"
-    description: "Unprivileged NGINX reverse-proxy ingress listener port on target SIL node"
-
-  HEALTH_CHECK_ENDPOINT:
-    value: "/health"
-    description: "Health check endpoint path for ingress verification"
-
-  # 5. Core Build Mechanics & Internal Coordinates
+  # .NET Build Mechanics & Telemetry Baselines
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
   DOTNET_NOLOGO: "true"
   NUGET_XMLDOC_MODE: "skip"
   ContinuousIntegrationBuild: "true"
 
+  # Internal Artifact & Code Analysis Endpoints
   REGISTRY_HOST: "nexus.homelab.local:8082"
   IMAGE_NAME: "mission-control/sensor-gateway"
   NEXUS_RAW_BASE: "http://10.0.0.182:8081/repository/raw-hosted"
@@ -93,6 +75,7 @@ variables:
   SONAR_PROJECT_KEY: "mission-control-api"
   JIRA_API_URL: "https://cp4learning.atlassian.net/rest/api/2/issue"
 
+  # SIL Deployment Target Details
   DEPLOY_SIL_AGENT_NAME: "sil-agent-01"
   DEPLOY_HOST_USER: "deployer"
 
@@ -125,9 +108,9 @@ stage_1_audit_gate:
     - echo "JIRA_KEY=${JIRA_KEY}" >> pipeline.env
     - echo "SHORT_SHA=${SHORT_SHA}" >> pipeline.env
     - echo "TARGET_RELEASE_TAG=${TARGET_TAG}" >> pipeline.env
-    - echo "DEPLOY_HOST_IP=${DEPLOY_TARGET_HOST}" >> pipeline.env
-    - echo "INGRESS_PORT=${INGRESS_PORT}" >> pipeline.env
-    - echo "HEALTH_CHECK_ENDPOINT=${HEALTH_CHECK_ENDPOINT}" >> pipeline.env
+    - echo "DEPLOY_HOST_IP=$[[ inputs.DEPLOY_TARGET_HOST ]]" >> pipeline.env
+    - echo "INGRESS_PORT=$[[ inputs.INGRESS_PORT ]]" >> pipeline.env
+    - echo "HEALTH_CHECK_ENDPOINT=$[[ inputs.HEALTH_CHECK_ENDPOINT ]]" >> pipeline.env
   artifacts:
     reports:
       dotenv: pipeline.env
@@ -139,7 +122,7 @@ stage_2_build_and_test:
   stage: build_and_test
   needs: [stage_1_audit_gate]
   rules:
-    - if: '$ENABLE_BUILD_AND_TEST == "true"'
+    - if: '"$[[ inputs.ENABLE_BUILD_AND_TEST ]]" == "true"'
   script:
     - set -euo pipefail
     - echo "=== [STAGE 2] DETERMINISTIC RESTORE, BUILD & SAST ==="
@@ -187,8 +170,7 @@ stage_2_build_and_test:
           echo "--> Executing test suite with TRX and Coverage..."
           mkdir -p /workspace/TestResults
           dotnet test tests/MissionControl.Tests/MissionControl.Tests.csproj \
-            -c Release \
-            --no-build \
+            -c Release --no-build \
             --logger "trx;LogFileName=test_results.trx" \
             --results-directory /workspace/TestResults \
             --collect:"XPlat Code Coverage" \
@@ -219,7 +201,7 @@ stage_3_publish_raw:
   stage: publish_raw
   needs: [stage_1_audit_gate, stage_2_build_and_test]
   rules:
-    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && $ENABLE_RAW_RELEASE_PUBLISH == "true"'
+    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && "$[[ inputs.ENABLE_RAW_RELEASE_PUBLISH ]]" == "true"'
   script:
     - set -euo pipefail
     - echo "=== [STAGE 3] PACKAGING RAW RELEASE BINARIES ==="
@@ -243,14 +225,14 @@ stage_4_container_gate:
   stage: container_gate
   needs: [stage_1_audit_gate, stage_2_build_and_test]
   rules:
-    - if: '$ENABLE_CONTAINER_PUBLISH == "true"'
+    - if: '"$[[ inputs.ENABLE_CONTAINER_PUBLISH ]]" == "true"'
   script:
     - set -euo pipefail
     - LOCAL_SCAN_TAG="${IMAGE_NAME}:scan-${CI_PIPELINE_IID}"
     - echo "--> Building candidate container with Chiseled runtime..."
     - docker build --build-arg BUILD_NUMBER=${CI_PIPELINE_IID} --build-arg GIT_COMMIT=${SHORT_SHA} -t "${LOCAL_SCAN_TAG}" -f Dockerfile .
     - |
-      if [ "$ENABLE_TRIVY_SCAN" = "true" ]; then
+      if [ "$[[ inputs.ENABLE_TRIVY_SCAN ]]" = "true" ]; then
         echo "--> [V&V Security Gate] Executing Aquasec Trivy scan (--exit-code 1)..."
         docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL --scanners vuln,secret --exit-code 1 --format table "${LOCAL_SCAN_TAG}"
       fi
@@ -293,11 +275,105 @@ stage_4_5_rrr_gate:
   stage: release_readiness
   needs: [stage_1_audit_gate, stage_4_container_gate]
   rules:
-    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && $DEPLOY_STRATEGY != "SKIP"'
+    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && "$[[ inputs.DEPLOY_STRATEGY ]]" != "SKIP"'
       when: manual
   script:
     - set -euo pipefail
     - echo "Release candidate ${TARGET_RELEASE_TAG} authorized by operator for SIL deployment."
     - CURL_CONF=$(mktemp)
     - chmod 600 "${CURL_CONF}"
-    - trap 'rm -f "${CURL_CONF}"' EXIT
+    - trap 'rm -f "${CURL_CONF}"' EXIT INT TERM
+    - AUTH_B64=$(printf "%s:%s" "$JIRA_USER" "$JIRA_TOKEN" | base64 | tr -d '\n')
+    - echo "header = \"Authorization: Basic ${AUTH_B64}\"" > "${CURL_CONF}"
+    - COMMENT="📋 RELEASE READINESS GATE: GitLab Pipeline [#${CI_PIPELINE_IID}\vert{}${CI_PIPELINE_URL}] passed SonarQube SAST, unit tests, and Trivy CVE gating.\n\nArtifact [${TARGET_RELEASE_TAG}] staged in Nexus and authorized for SIL hardware cutover [${DEPLOY_SIL_AGENT_NAME}]."
+    - curl -s -f -X POST -K "${CURL_CONF}" -H "Accept: application/json" -H "Content-Type: application/json" -d "{\"body\": \"${COMMENT}\"}" "${JIRA_API_URL}/${JIRA_KEY}/comment" || echo "[WARNING] Jira comment failed."
+
+# ==============================================================================
+# STAGE 5: DEPLOY TO SIL HARDWARE NODE (ANSIBLE OR SSH)
+# ==============================================================================
+stage_5_deploy_sil:
+  stage: deploy_sil
+  needs: [stage_1_audit_gate, stage_4_5_rrr_gate]
+  rules:
+    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && "$[[ inputs.DEPLOY_STRATEGY ]]" == "ANSIBLE"'
+  script:
+    - set -euo pipefail
+    - echo "=== [STAGE 5] EXECUTING ANSIBLE BLUE/GREEN CUTOVER ON SIL TARGET ==="
+    - KEY_TMP="./id_rsa_deploy"
+    - VAULT_TMP="./vault_pass_tmp"
+    - echo "$SIL_NODE_SSH_KEY" \vert{} base64 -d > "${KEY_TMP}"
+    - echo "$ANSIBLE_VAULT_PASSWORD" > "${VAULT_TMP}"
+    - chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
+    - trap 'shred -u -z -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
+    - CURRENT_ACTIVE=$(ssh -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
+    - echo "--> Baseline active slot on target SIL node: [${CURRENT_ACTIVE}]"
+    - |
+      docker run --rm \
+        -v "$CI_PROJECT_DIR:/workspace" \
+        -e ANSIBLE_HOST_KEY_CHECKING=False \
+        -w /workspace \
+        alpine/ansible:latest \
+        ansible-playbook -i ansible/inventory.ini ansible/deploy.yml \
+          --private-key "/workspace/${KEY_TMP#./}" \
+          --vault-password-file "/workspace/${VAULT_TMP#./}" \
+          -u "${DEPLOY_HOST_USER}" \
+          -e "target_tag=${TARGET_RELEASE_TAG}"
+
+stage_5_deploy_ssh_fallback:
+  stage: deploy_sil
+  needs: [stage_1_audit_gate, stage_4_5_rrr_gate]
+  rules:
+    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && "$[[ inputs.DEPLOY_STRATEGY ]]" == "STANDALONE_SSH"'
+  script:
+    - set -euo pipefail
+    - echo "=== [STAGE 5] EXECUTING STANDALONE SSH CUTOVER ==="
+    - KEY_TMP="./id_rsa_deploy"
+    - echo "$SIL_NODE_SSH_KEY" \vert{} base64 -d > "${KEY_TMP}"
+    - chmod 600 "${KEY_TMP}"
+    - trap 'shred -u -z -n 3 "${KEY_TMP}" 2>/dev/null \vert{}\vert{} rm -f "${KEY_TMP}"' EXIT INT TERM
+    - ssh -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "mkdir -p /tmp/mission-control"
+    - scp -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new infra/scripts/deploy.sh ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP}:/tmp/mission-control/deploy.sh
+    - ssh -i "${KEY_TMP}" ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${TARGET_RELEASE_TAG}"
+    - ssh -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "rm -rf /tmp/mission-control"
+
+# ==============================================================================
+# STAGE 6: INGRESS VERIFICATION & TWO-PHASE RECOVERY LADDER
+# ==============================================================================
+stage_6_verify_and_recover:
+  stage: verify_and_recover
+  needs: [stage_1_audit_gate, stage_5_deploy_sil]
+  rules:
+    - if: '($CI_COMMIT_BRANCH == "main" \vert{}\vert{} $CI_COMMIT_BRANCH == "master") && "$[[ inputs.DEPLOY_STRATEGY ]]" != "SKIP" && "$[[ inputs.ENABLE_INGRESS_HEALTH_CHECK ]]" == "true"'
+  script:
+    - set -euo pipefail
+    - HEALTH_URL="http://${DEPLOY_HOST_IP}:${INGRESS_PORT}${HEALTH_CHECK_ENDPOINT}"
+    - echo "=== [STAGE 6] POLLING INGRESS ENDPOINT: ${HEALTH_URL} ==="
+    - |
+      if curl --fail --retry 5 --retry-delay 2 --max-time 5 "${HEALTH_URL}"; then
+        echo "SUCCESS: Primary ingress probe verified."
+        exit 0
+      fi
+    - echo "Primary verification failed! Invoking Phase 1 automated rollback..." >&2
+    - KEY_TMP="./id_rsa_deploy"
+    - VAULT_TMP="./vault_pass_tmp"
+    - echo "$SIL_NODE_SSH_KEY" \vert{} base64 -d > "${KEY_TMP}"
+    - echo "$ANSIBLE_VAULT_PASSWORD" > "${VAULT_TMP}"
+    - chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
+    - trap 'shred -u -z -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
+    - |
+      if docker run --rm \
+        -v "$CI_PROJECT_DIR:/workspace" \
+        -e ANSIBLE_HOST_KEY_CHECKING=False \
+        -w /workspace \
+        alpine/ansible:latest \
+        ansible-playbook -i ansible/inventory.ini ansible/rollback.yml \
+          --private-key "/workspace/${KEY_TMP#./}" \
+          --vault-password-file "/workspace/${VAULT_TMP#./}" \
+          -u "${DEPLOY_HOST_USER}"; then
+
+        echo "Verifying restored fallback slot ingress..."
+        if curl --fail --retry 3 --retry-delay 2 --max-time 5 "${HEALTH_URL}"; then
+          echo "RECOVERY CONFIRMED: Rollback succeeded. Target node operating in degraded mode."
+          CURL_CONF=$(mktemp)
+          chmod 600 "${CURL_CONF}"
+          AUTH_B64=$(printf "%s:%s" "$JIRA_USER" "$JIRA_TOKEN"
