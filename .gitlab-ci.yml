@@ -238,7 +238,7 @@ stage_4_container_gate:
       fi
     - docker rmi "${LOCAL_SCAN_TAG}" 2>/dev/null || true
     - |
-      if [ "$CI_COMMIT_BRANCH" = "main" ] \vert{}\vert{} [ "$CI_COMMIT_BRANCH" = "master" ]; then
+      if [ "$CI_COMMIT_BRANCH" = "main" ] || [ "$CI_COMMIT_BRANCH" = "master" ]; then
         echo "$NEXUS_PASS" | docker login -u "$NEXUS_USER" --password-stdin "$REGISTRY_HOST"
         trap 'docker logout "$REGISTRY_HOST" 2>/dev/null || true' EXIT
 
@@ -285,7 +285,7 @@ stage_4_5_rrr_gate:
     - trap 'rm -f "${CURL_CONF}"' EXIT INT TERM
     - AUTH_B64=$(printf "%s:%s" "$JIRA_USER" "$JIRA_TOKEN" | base64 | tr -d '\n')
     - echo "header = \"Authorization: Basic ${AUTH_B64}\"" > "${CURL_CONF}"
-    - COMMENT="📋 RELEASE READINESS GATE: GitLab Pipeline [#${CI_PIPELINE_IID}\vert{}${CI_PIPELINE_URL}] passed SonarQube SAST, unit tests, and Trivy CVE gating.\n\nArtifact [${TARGET_RELEASE_TAG}] staged in Nexus and authorized for SIL hardware cutover [${DEPLOY_SIL_AGENT_NAME}]."
+    - COMMENT="📋 RELEASE READINESS GATE: GitLab Pipeline [#${CI_PIPELINE_IID}|${CI_PIPELINE_URL}] passed SonarQube SAST, unit tests, and Trivy CVE gating.\n\nArtifact [${TARGET_RELEASE_TAG}] staged in Nexus and authorized for SIL hardware cutover [${DEPLOY_SIL_AGENT_NAME}]."
     - curl -s -f -X POST -K "${CURL_CONF}" -H "Accept: application/json" -H "Content-Type: application/json" -d "{\"body\": \"${COMMENT}\"}" "${JIRA_API_URL}/${JIRA_KEY}/comment" || echo "[WARNING] Jira comment failed."
 
 # ==============================================================================
@@ -301,7 +301,7 @@ stage_5_deploy_sil:
     - echo "=== [STAGE 5] EXECUTING ANSIBLE BLUE/GREEN CUTOVER ON SIL TARGET ==="
     - KEY_TMP="./id_rsa_deploy"
     - VAULT_TMP="./vault_pass_tmp"
-    - echo "$SIL_NODE_SSH_KEY" \vert{} base64 -d > "${KEY_TMP}"
+    - echo "$SIL_NODE_SSH_KEY" | base64 -d > "${KEY_TMP}"
     - echo "$ANSIBLE_VAULT_PASSWORD" > "${VAULT_TMP}"
     - chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
     - trap 'shred -u -z -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
@@ -328,9 +328,9 @@ stage_5_deploy_ssh_fallback:
     - set -euo pipefail
     - echo "=== [STAGE 5] EXECUTING STANDALONE SSH CUTOVER ==="
     - KEY_TMP="./id_rsa_deploy"
-    - echo "$SIL_NODE_SSH_KEY" \vert{} base64 -d > "${KEY_TMP}"
+    - echo "$SIL_NODE_SSH_KEY" | base64 -d > "${KEY_TMP}"
     - chmod 600 "${KEY_TMP}"
-    - trap 'shred -u -z -n 3 "${KEY_TMP}" 2>/dev/null \vert{}\vert{} rm -f "${KEY_TMP}"' EXIT INT TERM
+    - trap 'shred -u -z -n 3 "${KEY_TMP}" 2>/dev/null || rm -f "${KEY_TMP}"' EXIT INT TERM
     - ssh -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "mkdir -p /tmp/mission-control"
     - scp -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new infra/scripts/deploy.sh ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP}:/tmp/mission-control/deploy.sh
     - ssh -i "${KEY_TMP}" ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "chmod 750 /tmp/mission-control/deploy.sh && /tmp/mission-control/deploy.sh ${TARGET_RELEASE_TAG}"
@@ -343,7 +343,7 @@ stage_6_verify_and_recover:
   stage: verify_and_recover
   needs: [stage_1_audit_gate, stage_5_deploy_sil]
   rules:
-    - if: '($CI_COMMIT_BRANCH == "main" \vert{}\vert{} $CI_COMMIT_BRANCH == "master") && "$[[ inputs.DEPLOY_STRATEGY ]]" != "SKIP" && "$[[ inputs.ENABLE_INGRESS_HEALTH_CHECK ]]" == "true"'
+    - if: '($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master") && "$[[ inputs.DEPLOY_STRATEGY ]]" != "SKIP" && "$[[ inputs.ENABLE_INGRESS_HEALTH_CHECK ]]" == "true"'
   script:
     - set -euo pipefail
     - HEALTH_URL="http://${DEPLOY_HOST_IP}:${INGRESS_PORT}${HEALTH_CHECK_ENDPOINT}"
@@ -356,7 +356,7 @@ stage_6_verify_and_recover:
     - echo "Primary verification failed! Invoking Phase 1 automated rollback..." >&2
     - KEY_TMP="./id_rsa_deploy"
     - VAULT_TMP="./vault_pass_tmp"
-    - echo "$SIL_NODE_SSH_KEY" \vert{} base64 -d > "${KEY_TMP}"
+    - echo "$SIL_NODE_SSH_KEY" | base64 -d > "${KEY_TMP}"
     - echo "$ANSIBLE_VAULT_PASSWORD" > "${VAULT_TMP}"
     - chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
     - trap 'shred -u -z -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
@@ -376,4 +376,13 @@ stage_6_verify_and_recover:
           echo "RECOVERY CONFIRMED: Rollback succeeded. Target node operating in degraded mode."
           CURL_CONF=$(mktemp)
           chmod 600 "${CURL_CONF}"
-          AUTH_B64=$(printf "%s:%s" "$JIRA_USER" "$JIRA_TOKEN"
+          AUTH_B64=$(printf "%s:%s" "$JIRA_USER" "$JIRA_TOKEN" | base64 | tr -d '\n')
+          echo "header = \"Authorization: Basic ${AUTH_B64}\"" > "${CURL_CONF}"
+          COMMENT="⚠️ INCIDENT REPORT: Ingress probe failed on target SIL hardware node. Automated rollback executed successfully to prior slot."
+          curl -s -f -X POST -K "${CURL_CONF}" -H "Accept: application/json" -H "Content-Type: application/json" -d "{\"body\": \"${COMMENT}\"}" "${JIRA_API_URL}/${JIRA_KEY}/comment" || true
+          rm -f "${CURL_CONF}"
+          exit 0
+        fi
+      fi
+      echo "CRITICAL: Automated rollback failed or fallback slot unhealthy!" >&2
+      exit 1
