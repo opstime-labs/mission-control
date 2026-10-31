@@ -1,7 +1,7 @@
 # Controlled Goods Program (CGP) & IEEE 828-2012 Compliance Matrix
 
 **Project:** MissionControl C#/.NET Delivery Framework & Hardware SIL Testbed  
-**Target Environment:** Leonardo DRS (Kanata, ON) — Mission Software, Naval Systems & Tactical Edge Gateways  
+**Target Environment:** Mission Software, Naval Systems & Tactical Edge Gateways  
 **Regulatory Frameworks:** 
 * Canadian Controlled Goods Regulations (SOR/2001-32 / Defence Production Act)
 * IEEE Std 828-2012 (Standard for Configuration Management in Systems and Software Engineering)
