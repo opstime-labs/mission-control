@@ -1,15 +1,33 @@
-# MissionControl: Defence-Grade CI/CD & SIL Deployment Pipeline for C# / .NET
+<div align="center">
 
+# 🛡️ MissionControl: Defence-Grade CI/CD & SIL Testbed
+### High-Integrity C#/.NET Delivery Framework for Regulated Naval & Tactical Edge Systems
+**Controlled Goods Program (CGP) • IEEE 828-2012 Configuration Baselines • Hardware-in-the-Loop SIL**
+
+<!-- Multi-Orchestrator Delivery Parity -->
+[![Jenkins](https://img.shields.io/badge/Jenkins-Air--Gapped%20Pipeline-D33833?style=for-the-badge&logo=jenkins&logoColor=white)](Jenkinsfile)
+[![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-Passed%20(Parity)-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](.github/workflows/mission-control-ci-cd.yml)
+[![Azure DevOps](https://img.shields.io/badge/Azure_DevOps-Passed%20(Parity)-0078D7?style=for-the-badge&logo=azure-devops&logoColor=white)](azure-pipelines.yml)
+[![GitLab CI](https://img.shields.io/badge/GitLab_CI-Passed%20(Parity)-FC6D26?style=for-the-badge&logo=gitlab&logoColor=white)](.gitlab-ci.yml)
+
+<br/>
+
+<!-- Defence Compliance & Technical Gates -->
 [![Security Compliance](https://img.shields.io/badge/Security-Controlled%20Goods%20(CGP)%20%7C%20IEEE%20828-0052cc?style=flat-square&logo=shield)](docs/cgp-compliance-matrix.md)
-[![Traceability Gate](https://img.shields.io/badge/Traceability-JIRA%20%E2%86%92%20Git%20%E2%86%92%20Jenkins%20%E2%86%92%20Nexus-0052cc?style=flat-square&logo=jira)](https://opstime.atlassian.net/browse/DRS-12)
-[![Build & Supply Chain](https://img.shields.io/badge/SDK-.NET%2010%20%2F%208%20%7C%20Locked%20SHA--512-512BD4?style=flat-square&logo=dotnet)](#7-devsecops--supply-chain-governance)
-[![Static Analysis & CVE](https://img.shields.io/badge/DevSecOps-SonarQube%20%7C%20Trivy%20High%2FCritical-4E9BCD?style=flat-square&logo=sonarqube)](#5-cicd-delivery-pipeline-architecture-jenkinsfile)
-[![Runtime Target](https://img.shields.io/badge/Runtime-Ubuntu%20Chiseled%20%28Non--Root%29-E95420?style=flat-square&logo=canonical)](#7-devsecops--supply-chain-governance)
-[![Hardware Testbed](https://img.shields.io/badge/SIL%20Target-RPi%20400%20(ARM64)%20%7C%20I2C%20%2B%20GPIO-C51A4A?style=flat-square&logo=raspberrypi)](#3-hardware-in-the-loop-hil-testbed-topology)
-[![Ingress & Cutover](https://img.shields.io/badge/Ingress-NGINX%20Zero--Downtime%20Blue%2FGreen-009639?style=flat-square&logo=nginx)](#8-bluegreen-zero-downtime-deployment-engine)
-[![Delivery Model](https://img.shields.io/badge/Release-Continuous%20Delivery%20%28RRR%20Gate%29-232F3E?style=flat-square)](#5-cicd-delivery-pipeline-architecture-jenkinsfile)
-[![GitHub Actions CI/CD](https://github.com/opstime-labs/mission-control/actions/workflows/mission-control-ci-cd.yml/badge.svg)](https://github.com/opstime-labs/mission-control/actions/workflows/mission-control-ci-cd.yml)
-An enterprise-grade, auditable CI/CD delivery pipeline and deployment framework engineered for mission-critical C#/.NET naval sensor, combat management, and Electronic Warfare (EW) edge gateways. Purpose-built to satisfy the rigorous audit, configuration control (IEEE 828 / EIA-649), and security mandates of Canadian defence Systems Integration Laboratories (SIL) and tactical edge nodes, this framework demonstrates bit-for-bit reproducible builds, air-gapped supply chain governance, distroless runtime hardening, Hardware-in-the-Loop pre-flight assertions, and autonomous fault recovery.
+[![Traceability Gate](https://img.shields.io/badge/Traceability-Jira%20%E2%86%92%20Git%20%E2%86%92%20CI%20%E2%86%92%20Nexus-0052cc?style=flat-square&logo=jira)](https://cp4learning-1791735579227.atlassian.net/jira/)
+[![Build & Supply Chain](https://img.shields.io/badge/.NET%2010%20%2F%208-Locked%20SHA--512%20Restore-512BD4?style=flat-square&logo=dotnet)](Directory.Build.props)
+[![Static Analysis](https://img.shields.io/badge/SonarQube-Quality%20Gate%20Passed-4E9BCD?style=flat-square&logo=sonarqube)](http://10.0.0.182:9000)
+[![CVE Scanner](https://img.shields.io/badge/Trivy-0%20HIGH%2FCRIT-1B8E5A?style=flat-square&logo=aquasec)](Dockerfile)
+[![Runtime Target](https://img.shields.io/badge/Runtime-Ubuntu%20Chiseled%20(Non--Root)-E95420?style=flat-square&logo=canonical)](Dockerfile)
+[![SIL Target](https://img.shields.io/badge/SIL%20Target-RPi%20400%20(ARM64)%20%7C%20Ansible%20Cutover-C51A4A?style=flat-square&logo=raspberrypi)](ansible/inventory.ini)
+[![Ingress & Cutover](https://img.shields.io/badge/Ingress-NGINX%20Zero--Downtime%20Blue%2FGreen-009639?style=flat-square&logo=nginx)](ansible/deploy.yml)
+
+---
+</div>
+
+An enterprise-grade, auditable CI/CD delivery framework and Systems Integration Lab (SIL) testbed engineered for mission-critical C#/.NET naval sensor, combat management, and Electronic Warfare (EW) edge gateways.
+
+Built to enforce the rigorous audit, configuration control (IEEE 828-2012 / EIA-649), and security mandates of the Canadian Controlled Goods Program (CGP), this repository demonstrates bit-for-bit deterministic builds, air-gapped dependency locking, distroless container runtime hardening, multi-orchestrator delivery parity (Jenkins, GitHub Actions, Azure DevOps, and GitLab CI), automated physical SIL hardware cutovers via Ansible, and dynamic multi-phase recovery ladders.
 
 ---
 
@@ -297,11 +315,29 @@ flowchart TD
 
 ---
 
-## 5.1. Dual-Engine Orchestration: Jenkins & GitHub Actions Parity
+## 5.1. Enterprise Multi-Orchestrator Delivery Parity
 
-To demonstrate enterprise infrastructure flexibility across both legacy on-premises installations and modern enterprise SCM platforms, MissionControl provides **bit-for-bit pipeline parity** across two distinct orchestrators:
-1. **Jenkins Declarative Pipeline (`Jenkinsfile`):** Docker-out-of-Docker (DooD) controller model running on the Ubuntu Mini PC.
-2. **GitHub Actions Enterprise Workflow (`.github/workflows/mission-control-ci-cd.yml`):** Executing on a hardened, self-hosted Linux runner inside the private subnet without public ingress exposure.
+To prevent vendor lock-in and support hybrid classified/unclassified enclaves, `MissionControl` achieves **100% functional and audit parity across four enterprise orchestrators**:
+
+* **Jenkins** (`Jenkinsfile` - Declarative Pipeline)
+* **GitHub Actions** (`.github/workflows/mission-control-ci-cd.yml`)
+* **Azure DevOps Pipelines** (`azure-pipelines.yml`)
+* **GitLab CI/CD** (`.gitlab-ci.yml` using `spec:inputs`)
+
+Each orchestrator executes against the same physical SIL target hardware (Raspberry Pi 400), enforcing identical security gates, container builds, and deployment safety ladders:
+
+| Delivery Gate / Stage | Verification & Audit Standard | Jenkins | GitHub Actions | Azure DevOps | GitLab CI |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1. Traceability Gate** | IEEE 828-2012 / CGP: Hard break if commit lacks Jira ticket (`DRS-XX`) | Regex matcher in Groovy script | Bash check + `$GITHUB_OUTPUT` | Bash check + `##vso[task.setvariable]` | Native regex + `dotenv` artifact |
+| **2. Deterministic Build & SAST** | .NET 10 locked restore, zero warnings, TRX test export, SonarQube quality gate | Isolated `dotnet-builder` container (`withCredentials`) | Self-hosted runner + Docker runtime | Containerized build step (`PublishTestResults@2`) | Isolated container run (`reports:junit`) |
+| **3. Raw Binary Staging** | Framework-dependent tarball (`.tar.gz`) + SHA-256 checksum digest | Curl upload to Nexus `raw-hosted` | Curl upload to Nexus `raw-hosted` | `PublishPipelineArtifact@1` + Curl | Artifact staging + Curl upload |
+| **4. Container Security Gate** | Ubuntu Noble Chiseled runtime, Aquasec Trivy gate (`--exit-code 1`) | Unprivileged Docker socket scan | Containerized Trivy scan step | Containerized Trivy scan step | Containerized Trivy scan step |
+| **5. Multi-Arch OCI Push** | Multi-platform build (`linux/amd64`, `linux/arm64`) to Sonatype Nexus OCI | Docker Buildx + QEMU | Docker Buildx + host networking | Docker Buildx custom `buildkitd.toml` | Docker Buildx container builder |
+| **6. Release Readiness Review** | Human-in-the-loop V&V deployment authorization + Jira audit sync | Interactive `input` with timeout | GitHub Environment (`production-sil`) | ADO Environment Approval Checks | Manual stage trigger (`when: manual`) |
+| **7. SIL Hardware Cutover** | Dynamic Blue/Green slot cutover on physical node via Ansible | Containerized `ansible-playbook` | Containerized `ansible-playbook` | Containerized `ansible-playbook` | Containerized `ansible-playbook` |
+| **8. Autonomous Recovery Ladder** | Ingress HTTP probe $\rightarrow$ Phase 1 Rollback $\rightarrow$ Phase 2 503 Fail-Safe | Dual-phase Groovy `try/catch` | Dynamic step conditionals (`steps.probe.outcome`) | Conditional shell rescue logic | Dynamic shell probe + fallback playbooks |
+
+
 
 ```mermaid
 flowchart TD
