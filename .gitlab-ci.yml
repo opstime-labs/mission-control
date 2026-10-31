@@ -253,7 +253,7 @@ stage_4_container_gate:
         docker buildx create --name gitlab-builder --driver docker-container --driver-opt network=host --config /tmp/buildkitd.toml --use
         docker buildx inspect --bootstrap
 
-        echo "--> Building & publishing multi-arch images (amd64 + arm64)..."
+        echo "--> Building & publishing multi-arch images amd64 & arm64..."
         docker buildx build \
           --builder gitlab-builder \
           --platform linux/amd64,linux/arm64 \
@@ -284,7 +284,7 @@ stage_4_5_rrr_gate:
     - chmod 600 "${CURL_CONF}"
     - trap 'rm -f "${CURL_CONF}"' EXIT INT TERM
     - AUTH_B64=$(printf "%s:%s" "$JIRA_USER" "$JIRA_TOKEN" | base64 | tr -d '\n')
-    - echo "header = \"Authorization: Basic ${AUTH_B64}\"" > "${CURL_CONF}"
+    - echo "header = \"Authorization:Basic ${AUTH_B64}\"" > "${CURL_CONF}"
     - |
       COMMENT="RELEASE READINESS GATE: GitLab Pipeline #${CI_PIPELINE_IID} passed SonarQube SAST, unit tests, and Trivy CVE gating. Artifact ${TARGET_RELEASE_TAG} staged in Nexus and authorized for SIL hardware cutover ${DEPLOY_SIL_AGENT_NAME}."
       curl -s -f -X POST -K "${CURL_CONF}" -H "Accept: application/json" -H "Content-Type: application/json" -d "{\"body\": \"${COMMENT}\"}" "${JIRA_API_URL}/${JIRA_KEY}/comment" || echo "[WARNING] Jira comment failed."
@@ -307,7 +307,7 @@ stage_5_deploy_sil:
     - chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
     - trap 'shred -u -z -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
     - CURRENT_ACTIVE=$(ssh -i "${KEY_TMP}" -o StrictHostKeyChecking=accept-new ${DEPLOY_HOST_USER}@${DEPLOY_HOST_IP} "cat /opt/mission-control/active_slot 2>/dev/null || echo 'blue'")
-    - echo "--> Baseline active slot on target SIL node: [${CURRENT_ACTIVE}]"
+    - echo "--> Baseline active slot on target SIL node:[${CURRENT_ACTIVE}]"
     - |
       docker run --rm \
         -v "$CI_PROJECT_DIR:/workspace" \
@@ -348,20 +348,21 @@ stage_6_verify_and_recover:
   script:
     - set -euo pipefail
     - HEALTH_URL="http://${DEPLOY_HOST_IP}:${INGRESS_PORT}${HEALTH_CHECK_ENDPOINT}"
-    - echo "=== [STAGE 6] POLLING INGRESS ENDPOINT: ${HEALTH_URL} ==="
+    - echo "=== [STAGE 6] POLLING INGRESS ENDPOINT:${HEALTH_URL} ==="
     - |
       if curl --fail --retry 5 --retry-delay 2 --max-time 5 "${HEALTH_URL}"; then
         echo "SUCCESS: Primary ingress probe verified."
         exit 0
       fi
-    - echo "Primary verification failed! Invoking Phase 1 automated rollback..." >&2
-    - KEY_TMP="./id_rsa_deploy"
-    - VAULT_TMP="./vault_pass_tmp"
-    - echo "$SIL_NODE_SSH_KEY" | base64 -d > "${KEY_TMP}"
-    - echo "$ANSIBLE_VAULT_PASSWORD" > "${VAULT_TMP}"
-    - chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
-    - trap 'shred -u -z -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
-    - |
+
+      echo "Primary verification failed! Invoking Phase 1 automated rollback..." >&2
+      KEY_TMP="./id_rsa_deploy"
+      VAULT_TMP="./vault_pass_tmp"
+      echo "$SIL_NODE_SSH_KEY" | base64 -d > "${KEY_TMP}"
+      echo "$ANSIBLE_VAULT_PASSWORD" > "${VAULT_TMP}"
+      chmod 600 "${KEY_TMP}" "${VAULT_TMP}"
+      trap 'shred -u -z -n 3 "${KEY_TMP}" "${VAULT_TMP}" 2>/dev/null || rm -f "${KEY_TMP}" "${VAULT_TMP}"' EXIT INT TERM
+
       if docker run --rm \
         -v "$CI_PROJECT_DIR:/workspace" \
         -e ANSIBLE_HOST_KEY_CHECKING=False \
