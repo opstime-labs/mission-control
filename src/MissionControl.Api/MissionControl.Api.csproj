@@ -13,15 +13,16 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
+ <ItemGroup>
+    <Content Include="$(IntermediateOutputPath)native-build/libsensor_hal.so" Condition="Exists('$(IntermediateOutputPath)native-build/libsensor_hal.so')">
+      <Link>libsensor_hal.so</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
   <Target Name="BuildNativeSensorHal" BeforeTargets="AssignTargetPaths">
     <Exec Command="cmake -S $(MSBuildProjectDirectory)/../native -B $(IntermediateOutputPath)native-build -DCMAKE_BUILD_TYPE=$(Configuration) &amp;&amp; cmake --build $(IntermediateOutputPath)native-build --config $(Configuration)" />
-    <ItemGroup>
-      <Content Include="$(IntermediateOutputPath)native-build/libsensor_hal.so">
-        <Link>libsensor_hal.so</Link>
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-      </Content>
-    </ItemGroup>
   </Target>
 
 </Project>
