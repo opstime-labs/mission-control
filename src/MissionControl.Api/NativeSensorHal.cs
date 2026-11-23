@@ -30,6 +30,6 @@ internal struct SensorFrame : IEquatable<SensorFrame>
 internal static partial class NativeSensorHal
 {
     [LibraryImport("sensor_hal", StringMarshalling = StringMarshalling.Utf8)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     internal static partial int read_sensor_frame(string devicePath, uint seq, out SensorFrame outFrame);
 }
