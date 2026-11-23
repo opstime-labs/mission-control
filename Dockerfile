@@ -3,7 +3,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
 WORKDIR /src
 
 RUN apt-get update -qq \
-    && apt-get install -y --no-install-recommends cmake gcc libc6-dev \
+    && apt-get install -y --no-install-recommends cmake make gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Build native C/C++ shared library (libsensor_hal.so) for target architecture

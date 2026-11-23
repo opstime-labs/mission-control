@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Install Java 21 LTS headless for SonarQube Scanner CLI
 RUN apt-get update -qq \
-    && apt-get install -y --no-install-recommends openjdk-21-jre-headless cmake gcc libc6-dev valgrind \
+    && apt-get install -y --no-install-recommends openjdk-21-jre-headless cmake make gcc libc6-dev valgrind \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
