@@ -132,7 +132,7 @@ stage_2_build_and_test:
     - HOST_GID=$(id -g)
     - |
       docker run --rm \
-        --user root \
+        --user "${HOST_UID}:${HOST_GID}" \
         --network host \
         -v "$CI_PROJECT_DIR:/workspace" \
         -w /workspace \
@@ -149,8 +149,7 @@ stage_2_build_and_test:
         "$DOTNET_BUILDER_IMAGE" \
         bash -c '
           set -euo pipefail
-          chmod -R a+rx /usr/local/bin/.store/dotnet-sonarscanner 2>/dev/null || true
-
+          
           echo "--> [C/C++ DevSecOps Gate] Compiling & executing ASan/UBSan sanitizer harness..."
           gcc -g -O1 -std=c11 -Wall -Wextra -Werror \
             -fsanitize=address,undefined -fno-omit-frame-pointer \

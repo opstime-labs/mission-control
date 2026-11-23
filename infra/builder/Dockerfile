@@ -22,5 +22,5 @@ RUN apt-get update -qq \
 # Install dotnet-sonarscanner into the global system binary path
 RUN dotnet tool install --tool-path /usr/local/bin dotnet-sonarscanner --version 9.0.1
 
-# Verify permissions
-RUN chmod +x /usr/local/bin/dotnet-sonarscanner
+# Ensure both the shim and the .store directory are readable and executable by non-root users
+RUN chmod -R a+rx /usr/local/bin/dotnet-sonarscanner /usr/local/bin/.store
