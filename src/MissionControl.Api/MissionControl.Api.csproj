@@ -13,13 +13,15 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
-  <Target Name="BuildNativeSensorHal" BeforeTargets="Build">
+  <Target Name="BuildNativeSensorHal" BeforeTargets="AssignTargetPaths">
     <Exec Command="cmake -S $(MSBuildProjectDirectory)/../native -B $(IntermediateOutputPath)native-build -DCMAKE_BUILD_TYPE=$(Configuration) &amp;&amp; cmake --build $(IntermediateOutputPath)native-build --config $(Configuration)" />
-    <Copy SourceFiles="$(IntermediateOutputPath)native-build/libsensor_hal.so" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-  </Target>
-
-  <Target Name="CopyNativeSensorHalToPublish" AfterTargets="Publish">
-    <Copy SourceFiles="$(IntermediateOutputPath)native-build/libsensor_hal.so" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <Content Include="$(IntermediateOutputPath)native-build/libsensor_hal.so">
+        <Link>libsensor_hal.so</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+    </ItemGroup>
   </Target>
 
 </Project>
