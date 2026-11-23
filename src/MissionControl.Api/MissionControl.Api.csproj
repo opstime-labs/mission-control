@@ -14,7 +14,7 @@
   </ItemGroup>
 
  <ItemGroup>
-    <Content Include="$(IntermediateOutputPath)native-build/libsensor_hal.so" Condition="Exists('$(IntermediateOutputPath)native-build/libsensor_hal.so')">
+    <Content Include="$(IntermediateOutputPath)native-build/libsensor_hal.so">
       <Link>libsensor_hal.so</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

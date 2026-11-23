@@ -25,4 +25,10 @@
     <ProjectReference Include="..\..\src\MissionControl.Api\MissionControl.Api.csproj" />
   </ItemGroup>
 
+  <Target Name="CopyNativeSensorHalToTests" AfterTargets="Build">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)/../../src/MissionControl.Api/obj/$(Configuration)/net10.0/native-build/libsensor_hal.so"
+          DestinationFolder="$(OutputPath)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>
