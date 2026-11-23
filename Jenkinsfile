@@ -108,7 +108,7 @@ pipeline {
         REGISTRY_HOST                     = 'nexus.homelab.local:8082'
         IMAGE_NAME                        = 'mission-control/sensor-gateway'
         NEXUS_RAW_BASE                    = "${params.NEXUS_RAW_HOST_URL ?: 'http://10.0.0.182:8081/repository/raw-hosted'}"
-        DOTNET_BUILDER_IMAGE              = 'nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r1'
+        DOTNET_BUILDER_IMAGE              = 'nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r2'
         SONAR_HOST_URL                    = "${params.SONAR_HOST_URL ?: 'http://10.0.0.182:9000'}"
         SONAR_PROJECT_KEY                 = 'mission-control-api'
         JIRA_API_URL                      = "${params.JIRA_ISSUE_API_ENDPOINT ?: 'https://cp4learning.atlassian.net/rest/api/2/issue'}"
@@ -222,6 +222,19 @@ pipeline {
                               "${env.DOTNET_BUILDER_IMAGE}" \
                               bash -c '
                                 set -euo pipefail
+
+                                echo "--> [C/C++ DevSecOps Gate] Compiling & executing ASan/UBSan sanitizer harness..."
+                                gcc -g -O1 -std=c11 -Wall -Wextra -Werror \
+                                    -fsanitize=address,undefined -fno-omit-frame-pointer \
+                                    src/native/test_sensor_hal.c src/native/sensor_hal.c \
+                                    -o /tmp/test_sensor_hal_asan
+                                /tmp/test_sensor_hal_asan
+
+                                echo "--> [C/C++ DevSecOps Gate] Building CMake target & running Valgrind memory-leak gate..."
+                                cmake -S src/native -B /tmp/native-build -DCMAKE_BUILD_TYPE=Debug
+                                cmake --build /tmp/native-build
+                                valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 \
+                                /tmp/native-build/test_sensor_hal
 
                                 echo "--> [Air-Gap Staging] Restoring dependencies in locked mode..."
                                 dotnet restore MissionControl.sln \

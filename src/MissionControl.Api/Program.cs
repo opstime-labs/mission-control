@@ -1,3 +1,6 @@
+using System.Threading;
+using MissionControl.Api;
+
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -88,6 +91,30 @@ app.MapGet("/weatherforecast", () =>
         ))
         .ToArray();
     return forecast;
+});
+
+uint sequenceCounter = 0;
+app.MapGet("/health", () =>
+{
+    uint seq = Interlocked.Increment(ref sequenceCounter);
+    int rc = NativeSensorHal.read_sensor_frame("/dev/i2c-1", seq, out SensorFrame frame);
+
+    if (rc != 0)
+    {
+        return Results.Problem(
+            detail: "Native sensor HAL returned non-zero status.",
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    return Results.Ok(new
+    {
+        status = "Healthy",
+        hardwarePresent = frame.HardwarePresent == 1,
+        deviceBus = "/dev/i2c-1",
+        sequenceId = frame.SequenceId,
+        temperatureC = frame.TemperatureMc / 1000.0,
+        busVoltageV = frame.BusVoltageMv / 1000.0
+    });
 });
 
 app.UseAuthorization();

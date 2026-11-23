@@ -96,7 +96,7 @@ variables:
   - name: NEXUS_RAW_BASE
     value: 'http://10.0.0.182:8081/repository/raw-hosted'
   - name: DOTNET_BUILDER_IMAGE
-    value: 'nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r1'
+    value: 'nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r2'
   - name: SONAR_HOST_URL
     value: 'http://10.0.0.182:9000'
   - name: SONAR_PROJECT_KEY
@@ -212,6 +212,17 @@ stages:
                 bash -c '
                   set -euo pipefail
                   chmod -R a+rx /usr/local/bin/.store/dotnet-sonarscanner 2>/dev/null || true
+
+                  gcc -g -O1 -std=c11 -Wall -Wextra -Werror \
+                    -fsanitize=address,undefined -fno-omit-frame-pointer \
+                    src/native/test_sensor_hal.c src/native/sensor_hal.c \
+                    -o /tmp/test_sensor_hal_asan
+                  /tmp/test_sensor_hal_asan
+
+                  cmake -S src/native -B /tmp/native-build -DCMAKE_BUILD_TYPE=Debug
+                  cmake --build /tmp/native-build
+                  valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 \
+                  /tmp/native-build/test_sensor_hal
 
                   dotnet restore MissionControl.sln --locked-mode --configfile nuget.config
                   

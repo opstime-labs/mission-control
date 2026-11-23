@@ -2,9 +2,9 @@
 # Build Agent Dockerfile for .NET Development + SonarScanner              
 # Build and push this image with the following tagging convention:
 # Tag : <dotnet-version>.<java-version>-sonar<scanner-version>-<image-revision>
-# For example, for .NET 8.0, Java 21, SonarScanner 9.0.1, and image revision 1:
-# docker build -t nexus.homelab.local:8082/infrastructure/dotnet-builder:8.0-java21-9.0.1 docker/build-agent/
-# docker push nexus.homelab.local:8082/infrastructure/dotnet-builder:8.0-java21-9.0.1
+# For example, for .NET 10.0, Java 21, SonarScanner 9.0.1, and image revision 1:
+# docker build -t nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r2 infra/builder/
+# docker push nexus.homelab.local:8082/infrastructure/dotnet-builder:10.0-jdk21-sonar9.0.1-r2
 #==================================================================================================================
 FROM mcr.microsoft.com/dotnet/sdk:10.0-noble
 
@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Install Java 21 LTS headless for SonarQube Scanner CLI
 RUN apt-get update -qq \
-    && apt-get install -y --no-install-recommends openjdk-21-jre-headless \
+    && apt-get install -y --no-install-recommends openjdk-21-jre-headless cmake gcc libc6-dev valgrind \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

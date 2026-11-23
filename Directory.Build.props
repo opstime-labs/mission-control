@@ -7,6 +7,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!-- Controlled Goods Baseline: Zero Compiler Warning Tolerance -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
