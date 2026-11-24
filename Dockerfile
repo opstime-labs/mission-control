@@ -6,11 +6,6 @@ RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends cmake make gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Build native C/C++ shared library (libsensor_hal.so) for target architecture
-COPY src/native/ src/native/
-RUN cmake -S src/native -B /tmp/native-build -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build /tmp/native-build --config Release
-    
 COPY Directory.Build.props nuget.config ./
 COPY src/MissionControl.Api/MissionControl.Api.csproj src/MissionControl.Api/
 COPY src/MissionControl.Api/packages.lock.json src/MissionControl.Api/
@@ -19,6 +14,7 @@ RUN dotnet restore src/MissionControl.Api/MissionControl.Api.csproj \
     --configfile nuget.config \
     --locked-mode
 
+COPY src/native/ src/native/
 COPY src/MissionControl.Api/ src/MissionControl.Api/
 WORKDIR /src/src/MissionControl.Api
 RUN dotnet publish MissionControl.Api.csproj \
