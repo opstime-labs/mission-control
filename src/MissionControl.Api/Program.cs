@@ -94,7 +94,7 @@ app.MapGet("/weatherforecast", () =>
 });
 
 uint sequenceCounter = 0;
-app.MapGet("/health", () =>
+app.MapGet("/api/sensors/health", () =>
 {
     uint seq = Interlocked.Increment(ref sequenceCounter);
     int rc = NativeSensorHal.read_sensor_frame("/dev/i2c-1", seq, out SensorFrame frame);

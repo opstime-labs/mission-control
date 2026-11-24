@@ -160,7 +160,7 @@
 
 - name: Poll target container internal health probe
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ target_port }}/health"
+    url: "http://127.0.0.1:{{ target_port }}/api/sensors/health"
     status_code: 200
     timeout: 3
   register: candidate_health
