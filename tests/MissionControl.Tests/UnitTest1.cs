@@ -68,4 +68,22 @@ public class MissionControlApiTests : IClassFixture<WebApplicationFactory<Progra
         Assert.True(firstItem.TryGetProperty("status", out var statusProp));
         Assert.False(string.IsNullOrEmpty(statusProp.GetString()));
     }
+
+    [Fact]
+    public async Task GetSensorHealthReturnsOkWithTelemetryPayload()
+    {
+        var response = await _client.GetAsync(new Uri("/api/sensors/health", UriKind.Relative));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+
+        Assert.Equal("Healthy", root.GetProperty("status").GetString());
+        Assert.False(root.GetProperty("hardwarePresent").GetBoolean());
+        Assert.Equal("/dev/i2c-1", root.GetProperty("deviceBus").GetString());
+        Assert.True(root.GetProperty("sequenceId").GetUInt32() >= 1);
+        Assert.Equal(42.5, root.GetProperty("temperatureC").GetDouble(), precision: 1);
+        Assert.Equal(3.3, root.GetProperty("busVoltageV").GetDouble(), precision: 1);
+    }
 }
