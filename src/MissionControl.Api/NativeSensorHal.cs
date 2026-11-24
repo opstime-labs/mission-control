@@ -6,26 +6,12 @@ using System.Runtime.InteropServices;
 namespace MissionControl.Api;
 
 [StructLayout(LayoutKind.Sequential)]
-internal struct SensorFrame : IEquatable<SensorFrame>
-{public readonly uint SequenceId;
+internal readonly struct SensorFrame
+{
+    public readonly uint SequenceId;
     public readonly int TemperatureMc;
     public readonly ushort BusVoltageMv;
     public readonly byte HardwarePresent;
-
-    public readonly bool Equals(SensorFrame other) =>
-        SequenceId == other.SequenceId &&
-        TemperatureMc == other.TemperatureMc &&
-        BusVoltageMv == other.BusVoltageMv &&
-        HardwarePresent == other.HardwarePresent;
-
-    public override readonly bool Equals(object? obj) =>
-        obj is SensorFrame other && Equals(other);
-
-    public override readonly int GetHashCode() =>
-        HashCode.Combine(SequenceId, TemperatureMc, BusVoltageMv, HardwarePresent);
-
-    public static bool operator ==(SensorFrame left, SensorFrame right) => left.Equals(right);
-    public static bool operator !=(SensorFrame left, SensorFrame right) => !left.Equals(right);
 }
 
 internal static partial class NativeSensorHal
