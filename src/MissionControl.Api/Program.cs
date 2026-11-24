@@ -125,11 +125,14 @@ app.Run();
 // -----------------------------------------------------------------------------
 // 5. CA1861 & CA1852 ROSLYN COMPLIANCE STRUCTURES
 // -----------------------------------------------------------------------------
-// Static holder eliminates repeated heap allocations (Resolves CA1861)
-internal static class MissionTelemetryData
+namespace MissionControl.Api
 {
-    public static readonly string[] Summaries = ["Nominal", "Elevated", "Degraded", "Critical", "Active"];
-}
+    // Static holder eliminates repeated heap allocations (Resolves CA1861)
+    internal static class MissionTelemetryData
+    {
+        public static readonly string[] Summaries = ["Nominal", "Elevated", "Degraded", "Critical", "Active"];
+    }
 
-// Sealed record avoids virtual dispatch overhead (Resolves CA1852)
-internal sealed record MissionTelemetry(DateOnly Date, int TemperatureC, string? Status);
+    // Sealed record avoids virtual dispatch overhead (Resolves CA1852)
+    internal sealed record MissionTelemetry(DateOnly Date, int TemperatureC, string? Status);
+}

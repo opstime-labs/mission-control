@@ -7,11 +7,10 @@ namespace MissionControl.Api;
 
 [StructLayout(LayoutKind.Sequential)]
 internal struct SensorFrame : IEquatable<SensorFrame>
-{
-    public uint SequenceId;
-    public int TemperatureMc;
-    public ushort BusVoltageMv;
-    public byte HardwarePresent;
+{public readonly uint SequenceId;
+    public readonly int TemperatureMc;
+    public readonly ushort BusVoltageMv;
+    public readonly byte HardwarePresent;
 
     public readonly bool Equals(SensorFrame other) =>
         SequenceId == other.SequenceId &&

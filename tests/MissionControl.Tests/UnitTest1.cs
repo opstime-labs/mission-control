@@ -11,6 +11,7 @@ public class MissionControlApiTests : IClassFixture<WebApplicationFactory<Progra
 
     public MissionControlApiTests(WebApplicationFactory<Program> factory)
     {
+         ArgumentNullException.ThrowIfNull(factory);
         _client = factory.CreateClient();
     }
 
@@ -18,7 +19,7 @@ public class MissionControlApiTests : IClassFixture<WebApplicationFactory<Progra
     public async Task GetHealthReturnsOkWithStructuredJson()
     {
         // Act
-        var response = await _client.GetAsync("/health");
+        var response = await _client.GetAsync(new Uri("/health", UriKind.Relative));
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -38,7 +39,7 @@ public class MissionControlApiTests : IClassFixture<WebApplicationFactory<Progra
     public async Task GetHealthzReturnsOkWithHealthyStatus()
     {
         // Act
-        var response = await _client.GetAsync("/healthz");
+        var response = await _client.GetAsync(new Uri("/healthz", UriKind.Relative));
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -52,7 +53,7 @@ public class MissionControlApiTests : IClassFixture<WebApplicationFactory<Progra
     public async Task GetWeatherForecastReturnsFiveTelemetryItems()
     {
         // Act
-        var response = await _client.GetAsync("/weatherforecast");
+        var response = await _client.GetAsync(new Uri("/weatherforecast", UriKind.Relative));
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
